@@ -1,0 +1,31 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Check types",
+            "command": "${workspaceFolder}/.venv/bin/mypy",
+            "args": ["src"],
+            "options": {
+                "env": {
+                    "PYTHONPATH": "${workspaceFolder}/src"
+                }
+            }
+        },
+        {
+            "label": "Run unit tests",
+            "command": "${workspaceFolder}/.venv/bin/python",
+            "args": ["-m", "unittest", "discover", "-t", "${workspaceFolder}",
+                     "-s", "${workspaceFolder}/test"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PYTHONPATH": "${workspaceFolder}/src:${workspaceFolder}/test",
+                    "PYTHONUNBUFFERED": "1",
+                    "PATH": "${config:env.ossCadSuiteDir}/bin:${env:PATH}"
+                }
+            }
+        },
+    ]
+}

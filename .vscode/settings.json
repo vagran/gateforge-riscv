@@ -1,0 +1,52 @@
+{
+    "cSpell.words": [
+        "bassign",
+        "Blinky",
+        "endcase",
+        "endfunction",
+        "endmodule",
+        "endprimitive",
+        "endtable",
+        "endtask",
+        "ftdi",
+        "gateforge",
+        "IDCODE",
+        "Insn",
+        "IOBUF",
+        "irlen",
+        "JRSTN",
+        "JSHIFT",
+        "JTAG",
+        "JTAGG",
+        "JTCK",
+        "JTDI",
+        "JTDO",
+        "JUPDATE",
+        "localparam",
+        "LVCMOS",
+        "nand",
+        "negedge",
+        "newtap",
+        "OPENDRAIN",
+        "posedge",
+        "PULLMODE",
+        "pyftdi",
+        "Riscv",
+        "Synthesizable",
+        "Testbench",
+        "Unwired",
+        "verilator",
+        "Verilog",
+        "wireable",
+        "xnor",
+        "yosys"
+    ],
+    "env": {
+        "gfDir": "/home/artyom/projects/fpga/source_gateforge/src",
+        "ossCadSuiteDir": "/opt/oss-cad-suite"
+    },
+    "python.analysis.include": [
+        "/home/artyom/projects/fpga/gateforge_riscv/src",
+        "/home/artyom/projects/fpga/source_gateforge/src"
+    ]
+}
