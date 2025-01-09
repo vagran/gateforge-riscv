@@ -1,8 +1,9 @@
+# mypy: disable-error-code="type-arg, valid-type"
 from dataclasses import dataclass
 from typing import Optional
 from gateforge.concepts import Bus, Interface
 from gateforge.core import InputNet, OutputNet, Reg, Wire
-from gateforge.dsl import _else, _if, always, const, namespace, reg, wire
+from gateforge.dsl import _else, _if, always, namespace, reg, wire
 
 
 @dataclass
@@ -110,7 +111,7 @@ class RiscvCpu:
             #XXX
             self.insn = reg(32, "insn")
             if self.dbg is not None:
-                self.dbg.decodedInsn <<=  self.insn
+                self.dbg.decodedInsn <<= self.insn
 
 
     def __call__(self):
