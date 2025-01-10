@@ -23,7 +23,9 @@
                 "env": {
                     "PYTHONPATH": "${workspaceFolder}/src:${workspaceFolder}/test",
                     "PYTHONUNBUFFERED": "1",
-                    "PATH": "${config:env.ossCadSuiteDir}/bin:${env:PATH}"
+                    "PATH": "${config:env.ossCadSuiteDir}/bin:${env:PATH}",
+                    "GF_TEST_CC": "/opt/clang-riscv/bin/clang",
+                    "GF_TEST_OBJDUMP": "/opt/clang-riscv/bin/llvm-objdump"
                 }
             }
         },

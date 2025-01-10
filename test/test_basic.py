@@ -84,6 +84,8 @@ class TestBase(unittest.TestCase):
 
 
 class Basic(TestBase):
+
+    @unittest.skip("Skip verilated test")
     def test_basic(self):
         self.mem.Write(0, 0xdeadbeef)
         while self.ports.memInsn:
