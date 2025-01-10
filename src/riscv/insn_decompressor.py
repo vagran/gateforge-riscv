@@ -1,15 +1,23 @@
+# This file contains declarative definition of compressed instructions set (see DefineCommands32()
+# and DefineCommands16()), and corresponding code to generate hardware definition and test data from
+# it.
+
 import argparse
 from enum import Enum, auto
 import os
 import re
 import subprocess
+from typing import Any, Optional, Sequence
 
-args = None
+args: Any = None
+
 
 class OpcodeComponent:
+    position: int
+
     """Bit-field in a command opcode.
     """
-    def GetSize():
+    def GetSize(self) -> int:
         """
         :return: Field size in bits
         """
@@ -17,9 +25,13 @@ class OpcodeComponent:
 
 
 class Bindings:
+    items: list[tuple[OpcodeComponent, int]]
+
+
     def __init__(self) -> None:
         # List of tuples (field reference, value)
         self.items = []
+
 
     def __str__(self) -> str:
         s = ""
@@ -29,16 +41,19 @@ class Bindings:
             s += f"{b[0]}: {b[1]}"
         return s
 
-    def Append(self, binding):
+
+    def Append(self, binding: tuple[OpcodeComponent, int]):
         self.items.append(binding)
 
-    def Extend(self, bindings):
+
+    def Extend(self, bindings: "Bindings" | list[tuple[OpcodeComponent, int]]):
         if isinstance(bindings, Bindings):
             self.items.extend(bindings.items)
         else:
             self.items.extend(bindings)
 
-    def Match(self, ref):
+
+    def Match(self, ref: OpcodeComponent) -> Optional[int]:
         """
         :param ref: Immediate or register reference.
         :return Binding value, None if not found.
@@ -61,7 +76,7 @@ class Bindings:
         return value
 
 
-def BitStringToBytes(s):
+def BitStringToBytes(s: str) -> bytes:
     l = []
     idx = 0
     while idx < len(s):
@@ -71,7 +86,22 @@ def BitStringToBytes(s):
 
 
 class CommandDesc:
-    def __init__(self, name, components, mapTo=None, isImmOffset=False) -> None:
+    """Command op-code definition.
+    """
+
+    name: str
+    components: Sequence[OpcodeComponent]
+    # Mapping to target 32-bit instruction. Specified only for compressed op-codes.
+    mapTo: Optional["DecompressionMapping"]
+    # Immediate in the op-code is an offset applied to register content.
+    isImmOffset: bool
+    immIsSigned: Optional[bool]
+    immHiBit: Optional[int]
+
+
+    def __init__(self, name, components: Sequence[OpcodeComponent],
+                 mapTo: Optional["DecompressionMapping"] = None,
+                 isImmOffset=False) -> None:
         self.name = name
         self.components = components
         self.mapTo = mapTo
@@ -88,6 +118,7 @@ class CommandDesc:
                     self.immIsSigned = c.isSigned
                 elif self.immIsSigned != c.isSigned:
                     raise Exception(f"Mixing signed and unsigned immediate field in one command: {name}")
+                assert c.hiBit is not None
                 if self.immHiBit is None or self.immHiBit < c.hiBit:
                     self.immHiBit = c.hiBit
 
@@ -100,12 +131,12 @@ class CommandDesc:
                 else:
                     break
 
+
     def __str__(self) -> str:
         return self.name
 
-    def VerifyBindings(self, bindings):
-        if bindings is None:
-            return
+
+    def VerifyBindings(self, bindings: Bindings):
         for b in bindings.items:
             param = self.FindParam(b[0])
             if param is None:
@@ -115,18 +146,20 @@ class CommandDesc:
                 b[1] == param.isNotEqual:
                 raise Exception("Constrained register bound to disallowed value")
 
-    def GetSize(self):
+
+    def GetSize(self) -> int:
         size = 0
         for comp in self.components:
             size += comp.GetSize()
         return size
 
-    def FindParam(self, paramType):
+
+    def FindParam(self, paramType: OpcodeComponent) -> Optional[OpcodeComponent]:
 
         if isinstance(paramType, imm):
             predicate = lambda c: isinstance(c, imm)
-        elif isinstance(paramType, RegReference):
 
+        elif isinstance(paramType, RegReference):
             if paramType.regType == RegType.SRC1:
                 regList = [RegType.SRC1, RegType.SRC_DST]
             elif paramType.regType == RegType.DST:
@@ -134,12 +167,14 @@ class CommandDesc:
             else:
                 regList = [paramType.regType]
             predicate = lambda c: isinstance(c, RegReference) and (c.regType in regList)
+
         else:
             raise Exception(f"Unsupported parameter type: {paramType}")
 
         return next((c for c in self.components if predicate(c)), None)
 
-    def FindImmediate(self, immBit):
+
+    def FindImmediate(self, immBit: int) -> Optional["ImmediateBits"]:
         """
         :param immBit: Immediate bit index to find.
         :return: Immediate chunk reference with the specified bit if found, None if not found.
@@ -147,11 +182,14 @@ class CommandDesc:
         for c in self.components:
             if not isinstance(c, ImmediateBits):
                 continue
+            assert c.hiBit is not None
+            assert c.loBit is not None
             if immBit <= c.hiBit and immBit >= c.loBit:
                 return c
         return None
 
-    def GetField(self, bitIdx):
+
+    def GetField(self, bitIdx: int) -> Optional[OpcodeComponent]:
         """_summary_
         :return: Field containing the specified bit.
         """
@@ -162,7 +200,8 @@ class CommandDesc:
                 return c
         raise Exception("Failed to find field")
 
-    def GetConstrainedRegisterFields(self):
+
+    def GetConstrainedRegisterFields(self) -> list["RegReference"]:
         """
         :return: List of register reference fields with not-equal value.
         """
@@ -172,13 +211,14 @@ class CommandDesc:
                 l.append(c)
         return l
 
-    def GenerateTestCases(self):
+
+    def GenerateTestCases(self) -> list[Bindings]:
         """
         :return List of lists of bindings for test cases for this command.
         """
         result = []
 
-        def Generate(positiveImm):
+        def Generate(positiveImm) -> Bindings:
             bindings = Bindings()
             if self.immIsSigned is not None:
                 if self.immAlign == 0:
@@ -201,41 +241,52 @@ class CommandDesc:
             result.append(Generate(False))
         return result
 
-    def GenerateOpcode(self, bindings):
+
+    def GenerateOpcode(self, bindings: Bindings) -> bytes:
         """
         :return: Opcode bytes.
         """
+
         # First generate bit string, MSB to LSB
         s = ""
+
         for c in self.components:
             if isinstance(c, ConstantBits):
                 s += c.GetBitString()
+
             elif isinstance(c, RegReference):
                 value = bindings.Match(c)
                 if value is None:
                     raise Exception("Failed to match reg ref against provided bindings")
                 s += c.BindValue(value).GetBitString()
+
             elif isinstance(c, ImmediateBits):
                 value = bindings.Match(c)
                 if value is None:
                     raise Exception("Failed to match immediate against provided bindings")
                 if value < 0 and not c.isSigned:
                     raise Exception("Negative value bound for unsigned immediate")
+                assert c.hiBit is not None
+                assert c.loBit is not None
                 s += ConstantBits.FromInt(32, value).Slice(c.hiBit, c.loBit).GetBitString()
+
             else:
                 raise Exception(f"Unrecognized field: {c}")
+
         if len(s) != 16 and len(s) != 32:
             raise Exception(f"Bad opcode length: {len(s)}")
+
         return BitStringToBytes(s)
 
-    def GenerateAsm(self, bindings):
+
+    def GenerateAsm(self, bindings: Bindings) -> str:
         """
         :param bindings: Bindings to use for arguments.
         :return: Assembler text for the command.
         """
         asm = self.name
         # Destination register if any
-        _rd = self.FindParam(rd())
+        _rd: RegReference = self.FindParam(rd()) # type: ignore
         if _rd is not None:
             v = bindings.Match(_rd)
             if v is None:
@@ -281,6 +332,7 @@ class CommandDesc:
                     v = 0x100000 + v
 
             if self.isImmOffset:
+                vrs1: Optional[int]
                 if self.name == "C.LWSP" or self.name == "C.SWSP":
                     # x2 for C.LWSP
                     vrs1 = 2
@@ -298,7 +350,8 @@ class CommandDesc:
 
         return asm
 
-    def GetConstantBit(self, bitIdx):
+
+    def GetConstantBit(self, bitIdx: int) -> Optional[int]:
         """
         :param bitIdx: Bit index to test.
         :return: Value of constant bit (1 or 0), or None if the bit is not constant.
@@ -314,14 +367,18 @@ class CommandDesc:
             return None
         raise Exception("Unexpected end of list")
 
-# Indexed by command name, element is CommandDesc
-commands32 = {}
-commands16 = {}
+
+# Indexed by command name
+commands32: dict[str,  CommandDesc] = {}
+commands16: dict[str,  CommandDesc] = {}
 
 # ##################################################################################################
 # Elements for declarative description of commands
 
 class ConstantBits(OpcodeComponent):
+    size: int
+    value: int
+
     """
     Some constant bits
     """
@@ -336,8 +393,9 @@ class ConstantBits(OpcodeComponent):
             raise Exception("Too long field")
         self.value = int(bits, base=2)
 
+
     @staticmethod
-    def FromInt(size, value):
+    def FromInt(size: int, value: int) -> "ConstantBits":
         max = (1 << size) - 1
         if value > max or value < -(max + 1) / 2:
             raise Exception(f"Value out of range: {value}")
@@ -345,16 +403,20 @@ class ConstantBits(OpcodeComponent):
             value = max + 1 + value
         return ConstantBits(format(value, f"0{size}b"))
 
-    def GetSize(self):
+
+    def GetSize(self) -> int:
         return self.size
 
-    def GetBitString(self):
+
+    def GetBitString(self) -> str:
         return format(self.value, f"0{self.size}b")
+
 
     def __str__(self) -> str:
         return self.GetBitString()
 
-    def Slice(self, hiBit, loBit):
+
+    def Slice(self, hiBit: int, loBit: int) -> "ConstantBits":
         """Get subset of this bits chunk.
         :param hiBit: High-order bit of the slice.
         :param loBit: Low-order bit of the slice.
@@ -370,16 +432,21 @@ class ConstantBits(OpcodeComponent):
 b = ConstantBits
 
 class ImmediateBits(OpcodeComponent):
+    hiBit: Optional[int]
+    loBit: Optional[int]
+    isSigned: bool
+
     """
     Some chunk of immediate value.
     """
-    def __init__(self, hiBit=None, loBit=None, isSigned=True):
+    def __init__(self, hiBit: Optional[int] = None, loBit: Optional[int] = None,
+                 isSigned: bool = True):
         """
         :param hiBit: Index of high-ordered bit of the chunk. Can be None when used as bind target.
         :param loBit: Index of low-ordered bit of the chunk, None if one bit chunk.
         """
         super().__init__()
-        if loBit is not None and loBit > hiBit:
+        if loBit is not None and hiBit is not None and loBit > hiBit:
             raise Exception("loBit is greater than hiBit")
         self.hiBit = hiBit
         if loBit is None:
@@ -388,10 +455,12 @@ class ImmediateBits(OpcodeComponent):
             self.loBit = loBit
         self.isSigned = isSigned
 
-    def GetSize(self):
+
+    def GetSize(self) -> int:
         if self.hiBit is None:
             raise Exception("No size for bind target")
         return 1 if self.loBit is None else self.hiBit - self.loBit + 1
+
 
     def __str__(self) -> str:
         s = ""
@@ -410,7 +479,7 @@ class ImmediateBits(OpcodeComponent):
 
 imm = ImmediateBits
 
-def uimm(hiBit, loBit=None):
+def uimm(hiBit: int, loBit: Optional[int] = None) -> ImmediateBits:
     """
     Chunk of unsigned immediate value.
     """
@@ -423,15 +492,24 @@ class RegType(Enum):
     DST = auto()
     SRC_DST = auto()
 
+
 class RegReference(OpcodeComponent):
-    def __init__(self, regType, isCompressed=False, isNotEqual=None):
+    regType: RegType
+    isCompressed: bool
+    # Field is defined for registers except this one if specified
+    isNotEqual: Optional[int]
+
+
+    def __init__(self, regType: RegType, isCompressed=False, isNotEqual: Optional[int] =None):
         super().__init__()
         self.regType = regType
         self.isCompressed = isCompressed
         self.isNotEqual = isNotEqual
 
+
     def GetSize(self):
         return 3 if self.isCompressed else 5
+
 
     def BindValue(self, value):
         """
@@ -446,6 +524,7 @@ class RegReference(OpcodeComponent):
             return ConstantBits.FromInt(3, value - 8)
         else:
             return ConstantBits.FromInt(5, value)
+
 
     def __str__(self) -> str:
         s = "r"
@@ -462,33 +541,33 @@ class RegReference(OpcodeComponent):
         return s
 
 
-def rs1():
+def rs1() -> RegReference:
     return RegReference(RegType.SRC1)
 
-def rs2(isNotEqual=None):
+def rs2(isNotEqual: Optional[int] = None) -> RegReference:
     return RegReference(RegType.SRC2, isNotEqual=isNotEqual)
 
-def rd(isNotEqual=None):
+def rd(isNotEqual: Optional[int] = None) -> RegReference:
     return RegReference(RegType.DST, isNotEqual=isNotEqual)
 
 def rsd():
     return RegReference(RegType.SRC_DST)
 
 # rs1' (prime) - compressed representation
-def rs1p():
+def rs1p() -> RegReference:
     return RegReference(RegType.SRC1, True)
 
-def rs2p():
+def rs2p() -> RegReference:
     return RegReference(RegType.SRC2, True)
 
-def rdp():
+def rdp() -> RegReference:
     return RegReference(RegType.DST, True)
 
-def rsdp():
+def rsdp() -> RegReference:
     return RegReference(RegType.SRC_DST, True)
 
 
-def cmd32(name, *components, isImmOffset=False):
+def cmd32(name: str, *components: OpcodeComponent, isImmOffset=False):
     if name in commands32:
         raise Exception(f"Command {name} already defined")
     cmd = CommandDesc(name, components, isImmOffset=isImmOffset)
@@ -497,7 +576,7 @@ def cmd32(name, *components, isImmOffset=False):
     commands32[name] = cmd
 
 
-def cmd16(name, mapTo, *components, isImmOffset=False):
+def cmd16(name: str, mapTo: "DecompressionMapping", *components: OpcodeComponent, isImmOffset=False):
     if name in commands16:
         raise Exception(f"Command {name} already defined")
     cmd = CommandDesc(name, components, mapTo=mapTo, isImmOffset=isImmOffset)
@@ -507,7 +586,10 @@ def cmd16(name, mapTo, *components, isImmOffset=False):
 
 
 class DecompressionMapping:
-    def __init__(self, cmdName, bindings=None):
+    targetCmd: CommandDesc
+    bindings: Bindings
+
+    def __init__(self, cmdName: str, bindings: Optional[Bindings] = None):
         """Mapping to 32 bits command.
         :param cmdName: 32 bits command name
         :param bindings: list of tuples (field, value)
@@ -520,12 +602,14 @@ class DecompressionMapping:
             self.bindings.Extend(bindings)
             self.targetCmd.VerifyBindings(self.bindings)
 
-    def FindBinding(self, component):
+
+    def FindBinding(self, component: OpcodeComponent) -> Optional[int]:
         """
         :param component: Immediate or register reference.
         :return Binding value, None if not found.
         """
         return self.bindings.Match(component)
+
 
 mapTo = DecompressionMapping
 
@@ -635,10 +719,14 @@ def DefineCommands16():
         b("110"), uimm(5,2), uimm(7,6), rs2(), b("10"),
         isImmOffset=True)
 
+
 # ##################################################################################################
 
 class BitsCopy:
-    def __init__(self, srcHi, srcLo, numReplicate=None) -> None:
+    srcLo: int
+    srcHi: int
+
+    def __init__(self, srcHi: int, srcLo: Optional[int], numReplicate: Optional[int] = None):
         """Bits chunk copying operation.
         :param srcHi: Index of source high-ordered bit.
         :param srcLo: Index of source low-ordered bit. May be None to indicate one bit size.
@@ -657,7 +745,8 @@ class BitsCopy:
                 raise Exception("Replication count can be specified for 1-bit source only")
         self.numReplicate = numReplicate
 
-    def CopyFromBitString(self, s):
+
+    def CopyFromBitString(self, s: str) -> str:
         """
         :param s: Source bit string.
         :return: Slice with corresponding bits.
@@ -666,16 +755,21 @@ class BitsCopy:
             raise Exception("Expected 16 bits bit-string")
         if self.numReplicate is not None:
             return s[15 - self.srcHi] * self.numReplicate
-        return s[15-self.srcHi:16-self.srcLo]
+        return s[15 - self.srcHi : 16 - self.srcLo]
 
 
 class CommandTransform:
+    srcCmd: CommandDesc
+    components: list[ConstantBits | BitsCopy]
+
+
     """Implements command transformation from compressed 16-bits representation to 32-bits
     representation.
     """
-    def __init__(self, cmd16Desc) -> None:
+    def __init__(self, cmd16Desc: CommandDesc):
         self.srcCmd = cmd16Desc
         self.components = []
+        assert cmd16Desc.mapTo is not None
         targetCmd = cmd16Desc.mapTo.targetCmd
         for c in targetCmd.components:
             if isinstance(c, ConstantBits):
@@ -686,7 +780,7 @@ class CommandTransform:
                 if binding is not None:
                     self.components.append(ConstantBits.FromInt(5, binding))
                 else:
-                    regRef = cmd16Desc.FindParam(c)
+                    regRef: RegReference = cmd16Desc.FindParam(c) # type: ignore
                     if regRef is None:
                         raise Exception("Cannot find register in source " +
                                         f"command: {c.regType} in {cmd16Desc.name}")
@@ -700,7 +794,10 @@ class CommandTransform:
             elif isinstance(c, ImmediateBits):
                 binding = cmd16Desc.mapTo.FindBinding(c)
                 if binding is not None:
+                    assert targetCmd.immHiBit is not None
                     bits = ConstantBits.FromInt(targetCmd.immHiBit + 1, binding)
+                    assert c.hiBit is not None
+                    assert c.loBit is not None
                     self.components.append(bits.Slice(c.hiBit, c.loBit))
                 else:
                     self._HandleImmediateChunk(c)
@@ -711,7 +808,8 @@ class CommandTransform:
         self._FoldReplications()
         self._FoldConstantBits()
 
-    def _HandleImmediateChunk(self, c):
+
+    def _HandleImmediateChunk(self, c: ImmediateBits):
         if self.srcCmd.immHiBit is None:
             raise Exception("No immediate field in source command")
 
@@ -719,6 +817,10 @@ class CommandTransform:
         hiBit = None
         loBit = None
         srcHiBit = None
+
+        assert c.hiBit is not None
+        assert c.loBit is not None
+        assert self.srcCmd.immHiBit is not None
 
         def CommitBits():
             nonlocal isZeroBits, hiBit, loBit, srcHiBit
@@ -779,6 +881,7 @@ class CommandTransform:
 
         CommitBits()
 
+
     def _FoldReplications(self):
         # Fold several adjacent bits replications into one component
         out = []
@@ -807,6 +910,7 @@ class CommandTransform:
 
         Commit()
         self.components = out
+
 
     def _FoldConstantBits(self):
         # Fold several adjacent constant bits into one component
@@ -839,7 +943,8 @@ class CommandTransform:
         Commit()
         self.components = out
 
-    def Apply(self, opcode16):
+
+    def Apply(self, opcode16: bytes) -> bytes:
         """
         :param opcode16: 16-bits opcode (bytes) to apply transform on.
         :return 32-bits decompressed opcode (bytes).
@@ -857,7 +962,8 @@ class CommandTransform:
             raise Exception(f"Unexpected result size: {len(s)}")
         return BitStringToBytes(s)
 
-    def GenerateVerilogExpression(self, inputVarName):
+
+    def GenerateVerilogExpression(self, inputVarName: str) -> str:
         """
         :param inputVarName: 16 bits opcode variable name.
         :return: Expression for decompressed 30 bits opcode (assume two LSB is 2'b11)
@@ -892,12 +998,13 @@ class CommandTransform:
         return s
 
 
-def Assemble(commandText, isCompressed):
+def Assemble(commandText: str, isCompressed: bool) -> bytes:
     """
     :param commandText: Command test in assembler language.
     :param embeddedTarget: True to target RV32E, false for RV32I.
     :return bytes for the command.
     """
+
 
     code = f"""
 .text
@@ -926,7 +1033,7 @@ def Assemble(commandText, isCompressed):
         os.remove(objFile)
 
 
-def DoSelfTest():
+def DoSelfTest() -> None:
     for cmdName in commands16.keys():
         print(f"\n========================= {cmdName} =========================")
         cmd = commands16[cmdName]
@@ -942,6 +1049,7 @@ def DoSelfTest():
                                 f"{asmB.hex(' ')} vs {opc.hex(' ')}")
 
             # Compile base instruction
+            assert cmd.mapTo is not None
             baseCmd = cmd.mapTo.targetCmd
             baseBindings = Bindings()
             baseBindings.Extend(tc)
@@ -970,7 +1078,19 @@ def DoSelfTest():
 class SelectionTree:
     """Contains logic for identifying input 16-bits command.
     """
+    rootNode: "Node"
+
+
     class Node:
+        # Temporal node (while building the tree) contains list of commands here, final interim node
+        # contains Node instance, leaf node contains single command descriptor
+        first: Optional[list[CommandDesc] | CommandDesc | "SelectionTree.Node"]
+        second: Optional[list[CommandDesc] | CommandDesc | "SelectionTree.Node"]
+        hiBit: int
+        loBit: int
+        notEqualValue: Optional[int]
+
+
         def __init__(self, hiBit, loBit=None, notEqualValue=None) -> None:
             # True case for if, either Node or CommandDesc
             self.first = None
@@ -980,30 +1100,40 @@ class SelectionTree:
             self.loBit = loBit if loBit is not None else hiBit
             self.notEqualValue = notEqualValue
 
-        def HasBetterBalance(self, node):
+
+        def HasBetterBalance(self, node: "SelectionTree.Node") -> bool:
             """
             :return: True if this temporal node has better balance than the specified one.
             """
+            assert(isinstance(self.first, list))
+            assert(isinstance(self.second, list))
+            assert(isinstance(node.first, list))
+            assert(isinstance(node.second, list))
             return abs(len(self.first) - len(self.second)) < abs(len(node.first) - len(node.second))
 
-        def GetConditionExpr(self, varName):
+
+        def GetConditionExpr(self, varName: str) -> str:
             """
             :param varName: Variable name which stores 16-bits opcode.
-            :return: String with expression for `if` statement.
+            :return: String with Verilog expression for `if` statement.
             """
             if self.loBit == self.hiBit:
                 return f"{varName}[{self.hiBit}]"
             return f"{varName}[{self.hiBit}:{self.loBit}] != {self.notEqualValue}"
 
-    def __init__(self, rootNode) -> None:
+
+    def __init__(self, rootNode: Node) -> None:
         self.rootNode = rootNode
 
-    @staticmethod
-    def Generate(commands):
-        return SelectionTree(SelectionTree.GenerateNode(commands))
 
     @staticmethod
-    def GenerateNode(commands):
+    def Generate(commands) -> "SelectionTree":
+        assert len(commands) > 1
+        return SelectionTree(SelectionTree.GenerateNode(commands)) # type: ignore
+
+
+    @staticmethod
+    def GenerateNode(commands: Sequence[CommandDesc]) -> Node | CommandDesc:
         if len(commands) == 1:
             return commands[0]
         # List of possible nodes, one be selected with the best balance
@@ -1013,6 +1143,8 @@ class SelectionTree:
             if node is not None:
                 if candidate is None or node.HasBetterBalance(candidate):
                     candidate = node
+                assert isinstance(candidate.first, list)
+                assert isinstance(candidate.second, list)
                 if abs(len(candidate.first) - len(candidate.second)) < 2:
                     # Already optimal balance
                     break
@@ -1030,6 +1162,8 @@ class SelectionTree:
                 if node is not None:
                     if candidate is None or node.HasBetterBalance(candidate):
                         candidate = node
+                    assert isinstance(candidate.first, list)
+                    assert isinstance(candidate.second, list)
                     if abs(len(candidate.first) - len(candidate.second)) < 2:
                         # Already optimal balance
                         break
@@ -1039,21 +1173,25 @@ class SelectionTree:
 
         if candidate is None:
             raise Exception("Failed to generate selector for nodes: " + ", ".join(map(str, commands)))
+        assert isinstance(candidate.first, list)
+        assert isinstance(candidate.second, list)
         candidate.first = SelectionTree.GenerateNode(candidate.first)
         candidate.second = SelectionTree.GenerateNode(candidate.second)
         return candidate
 
+
     @staticmethod
-    def TryGenerateNode(commands, hiBit, loBit=None):
+    def TryGenerateNode(commands: Sequence[CommandDesc], hiBit: int,
+                        loBit: Optional[int] = None) -> Optional[Node]:
         """
         :param hiBit: MSB to test.
         :param loBit: LSB to test, None if one bit.
         :return: Temporal node (children are lists of commands), or None if cannot be created on the
         specified bits.
         """
-        nzCommands = []
-        zCommands = []
-        notEqualValue = None
+        nzCommands: list[CommandDesc] = []
+        zCommands: list[CommandDesc] = []
+        notEqualValue: Optional[int] = None
 
         if loBit is None:
             # Single bit test
@@ -1068,7 +1206,7 @@ class SelectionTree:
         else:
             # Bit-field test against not-equal value.
             # Bit index to value
-            value = {}
+            value: dict[int, int] = {}
             for cmd in commands:
                 isConstant = None
                 for bitIdx in range(loBit, hiBit + 1):
@@ -1114,7 +1252,8 @@ class SelectionTree:
         node.second = zCommands
         return node
 
-    def GenerateVerilog(self, insn16VarName, insn32VarName):
+
+    def GenerateVerilog(self, insn16VarName: str, insn32VarName: str) -> str:
         """
         :param insn16VarName: Name for input variable which stores 16-bits opcode.
         :param insn32VarName: Name for output variable which stores 32-bits opcode.
@@ -1122,36 +1261,45 @@ class SelectionTree:
         """
         return self._GenerateNodeVerilog(self.rootNode, insn16VarName, insn32VarName, 0)
 
-    def _GenerateNodeVerilog(self, node, insn16VarName, insn32VarName, indent):
+
+    def _GenerateNodeVerilog(self, node: "Node", insn16VarName: str, insn32VarName: str,
+                             indent: int) -> str:
         INDENT = "    "
         _indent = INDENT * indent
         s = ""
         s += f"{_indent}if ({node.GetConditionExpr(insn16VarName)}) begin\n"
         if isinstance(node.first, CommandDesc):
+            assert node.first.mapTo is not None
             s += f"{_indent + INDENT}// {node.first} -> {node.first.mapTo.targetCmd}\n"
             t = CommandTransform(node.first)
             s += f"{_indent + INDENT}{insn32VarName} = {t.GenerateVerilogExpression(insn16VarName)};\n"
         else:
+            assert isinstance(node.first, SelectionTree.Node)
             s += self._GenerateNodeVerilog(node.first, insn16VarName, insn32VarName, indent + 1)
+
         s += f"{_indent}end else begin\n"
+
         if isinstance(node.second, CommandDesc):
+            assert node.second.mapTo is not None
             s += f"{_indent + INDENT}// {node.second} -> {node.second.mapTo.targetCmd}\n"
             t = CommandTransform(node.second)
             s += f"{_indent + INDENT}{insn32VarName} = {t.GenerateVerilogExpression(insn16VarName)};\n"
         else:
+            assert isinstance(node.second, SelectionTree.Node)
             s += self._GenerateNodeVerilog(node.second, insn16VarName, insn32VarName, indent + 1)
+
         s += f"{_indent}end\n"
         return s
 
 
-def GenerateVerilogDecompressor(outputPath):
+def GenerateVerilogDecompressor(outputPath: str):
     selTree = SelectionTree.Generate(commands16.values())
     with open(outputPath, "w") as f:
         f.write("// Do not edit! This file is generated by gen_decompressor.py\n\n")
         f.write(selTree.GenerateVerilog("insn16", "insn32"))
 
 
-def GenerateTestCpp(outputPath):
+def GenerateTestCpp(outputPath: str):
      with open(outputPath, "w") as f:
         f.write("// Do not edit! This file is generated by gen_decompressor.py\n\n")
 
@@ -1160,6 +1308,7 @@ def GenerateTestCpp(outputPath):
             tcs = cmd.GenerateTestCases()
             for tc in tcs:
                 opc16 = cmd.GenerateOpcode(tc)
+                assert cmd.mapTo is not None
                 baseCmd = cmd.mapTo.targetCmd
                 baseBindings = Bindings()
                 baseBindings.Extend(tc)
