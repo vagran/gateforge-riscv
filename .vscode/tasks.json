@@ -29,5 +29,22 @@
                 }
             }
         },
+        {
+            "label": "Run unit tests (no Verilator)",
+            "command": "${workspaceFolder}/.venv/bin/python",
+            "args": ["-m", "unittest", "discover", "-t", "${workspaceFolder}",
+                     "-s", "${workspaceFolder}/test"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PYTHONPATH": "${workspaceFolder}/src:${workspaceFolder}/test",
+                    "PYTHONUNBUFFERED": "1",
+                    "PATH": "${config:env.ossCadSuiteDir}/bin:${env:PATH}",
+                    "GF_TEST_CC": "/opt/clang-riscv/bin/clang",
+                    "GF_TEST_OBJDUMP": "/opt/clang-riscv/bin/llvm-objdump",
+                    "DISABLE_VERILATOR_TESTS": "1"
+                }
+            }
+        },
     ]
 }

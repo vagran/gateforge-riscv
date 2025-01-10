@@ -1,5 +1,9 @@
+import os
 from gateforge.dsl import wire
 from riscv.core import RiscvParams, RiscvCpu, MemoryInterface, ControlInterface
+
+
+disableVerilatorTests = int(os.getenv("DISABLE_VERILATOR_TESTS", "0"))
 
 
 class Testbench:

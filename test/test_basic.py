@@ -6,7 +6,7 @@ import unittest
 from gateforge.compiler import CompileModule
 from gateforge.core import RenderOptions
 from gateforge.verilator import VerilatorParams
-from testbench import TestbenchModule
+from testbench import TestbenchModule, disableVerilatorTests
 
 
 class NullOutput(io.StringIO):
@@ -83,9 +83,9 @@ class TestBase(unittest.TestCase):
         self.sim.DumpVcd()
 
 
+@unittest.skipIf(disableVerilatorTests, "Verilator")
 class Basic(TestBase):
 
-    @unittest.skip("Skip verilated test")
     def test_basic(self):
         self.mem.Write(0, 0xdeadbeef)
         while self.ports.memInsn:
