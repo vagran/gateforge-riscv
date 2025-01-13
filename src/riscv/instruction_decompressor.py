@@ -1,3 +1,4 @@
+# mypy: disable-error-code="type-arg, valid-type"
 # This file contains declarative definition of compressed instructions set (see DefineCommands32()
 # and DefineCommands16()), and corresponding code to generate hardware definition and test data from
 # it.
@@ -8,6 +9,9 @@ import os
 import re
 import subprocess
 from typing import Any, Optional, Sequence
+
+from gateforge.core import Expression, InputNet, OutputNet, Wire
+from gateforge.dsl import _else, _if, concat, const
 
 args: Any = None
 
@@ -963,6 +967,7 @@ class CommandTransform:
         return BitStringToBytes(s)
 
 
+    #XXX
     def GenerateVerilogExpression(self, inputVarName: str) -> str:
         """
         :param inputVarName: 16 bits opcode variable name.
@@ -996,6 +1001,31 @@ class CommandTransform:
                 raise Exception("Unexpected component type")
         s += "}"
         return s
+
+
+    def SynthesizeExpression(self, input: InputNet[Wire, 16]) -> Expression:
+        result: list[Expression] = []
+        lastComp = self.components[len(self.components) - 1]
+        if not isinstance(lastComp, ConstantBits):
+            raise Exception("Expected constant bits in last component")
+        trimmedLastComp = lastComp.Slice(lastComp.size - 1, 2)
+        for c in self.components:
+            if c is lastComp:
+                c = trimmedLastComp
+            if isinstance(c, ConstantBits):
+                result.append(const(c.value, c.size))
+            elif isinstance(c, BitsCopy):
+                if c.numReplicate is None:
+                    if c.srcLo == c.srcHi:
+                        result.append(input[c.srcHi])
+                    else:
+                        result.append(input[c.srcHi:c.srcLo])
+                else:
+                    result.append(input[c.srcHi].replicate(c.numReplicate))
+
+            else:
+                raise Exception("Unexpected component type")
+        return concat(*result)
 
 
 def Assemble(commandText: str, isCompressed: bool, tmpObjFileName: Optional[str] = None) -> bytes:
@@ -1035,6 +1065,7 @@ def Assemble(commandText: str, isCompressed: bool, tmpObjFileName: Optional[str]
         os.remove(objFileName)
 
 
+#XXX
 def DoSelfTest() -> None:
     for cmdName in commands16.keys():
         print(f"\n========================= {cmdName} =========================")
@@ -1114,6 +1145,7 @@ class SelectionTree:
             return abs(len(self.first) - len(self.second)) < abs(len(node.first) - len(node.second))
 
 
+        #XXX
         def GetConditionExpr(self, varName: str) -> str:
             """
             :param varName: Variable name which stores 16-bits opcode.
@@ -1122,6 +1154,12 @@ class SelectionTree:
             if self.loBit == self.hiBit:
                 return f"{varName}[{self.hiBit}]"
             return f"{varName}[{self.hiBit}:{self.loBit}] != {self.notEqualValue}"
+
+
+        def GetConditionExpr_new(self, cmd16net: InputNet[Wire, 16]) -> Expression:
+            if self.loBit == self.hiBit:
+                return cmd16net[self.hiBit]
+            return cmd16net[self.hiBit:self.loBit] != self.notEqualValue
 
 
     def __init__(self, rootNode: Node) -> None:
@@ -1255,6 +1293,7 @@ class SelectionTree:
         return node
 
 
+    #XXX
     def GenerateVerilog(self, insn16VarName: str, insn32VarName: str) -> str:
         """
         :param insn16VarName: Name for input variable which stores 16-bits opcode.
@@ -1264,6 +1303,50 @@ class SelectionTree:
         return self._GenerateNodeVerilog(self.rootNode, insn16VarName, insn32VarName, 0)
 
 
+    def Synthesize(self, input: InputNet[Wire, 16], output: OutputNet[Wire, 32]):
+        """
+        Synthesizes decompression logic. Should be called in context of combinational procedural
+        block.
+        :param input: Input net with compressed 16-bits opcode.
+        :param output: Output net to assign 32-bits decompressed opcode.
+        """
+        self._SynthesizeNode(self.rootNode, input, output)
+
+
+    def _SynthesizeNode(self, node: "Node", insn16: InputNet[Wire, 16], insn32: OutputNet[Wire, 32]):
+
+        with _if(node.GetConditionExpr_new(insn16)):
+
+            if isinstance(node.first, CommandDesc):
+                assert node.first.mapTo is not None
+                # comment(f"{node.first} -> {node.first.mapTo.targetCmd}")
+                t = CommandTransform(node.first)
+                expr = t.SynthesizeExpression(insn16)
+                if insn32.isReg:
+                    insn32 <<= expr
+                else:
+                    insn32 //= expr
+            else:
+                assert isinstance(node.first, SelectionTree.Node)
+                self._SynthesizeNode(node.first, insn16, insn32)
+
+        with _else():
+
+            if isinstance(node.second, CommandDesc):
+                assert node.second.mapTo is not None
+                # comment(f"{node.second} -> {node.second.mapTo.targetCmd}")
+                t = CommandTransform(node.second)
+                expr = t.SynthesizeExpression(insn16)
+                if insn32.isReg:
+                    insn32 <<= expr
+                else:
+                    insn32 //= expr
+            else:
+                assert isinstance(node.second, SelectionTree.Node)
+                self._SynthesizeNode(node.second, insn16, insn32)
+
+
+    #XXX
     def _GenerateNodeVerilog(self, node: "Node", insn16VarName: str, insn32VarName: str,
                              indent: int) -> str:
         INDENT = "    "
@@ -1294,6 +1377,7 @@ class SelectionTree:
         return s
 
 
+#XXX
 def GenerateVerilogDecompressor(outputPath: str):
     selTree = SelectionTree.Generate(commands16.values())
     with open(outputPath, "w") as f:
@@ -1301,6 +1385,20 @@ def GenerateVerilogDecompressor(outputPath: str):
         f.write(selTree.GenerateVerilog("insn16", "insn32"))
 
 
+def Synthesize(input: InputNet[Wire, 16], output: OutputNet[Wire, 30]):
+    """Synthesize decompressor logic. It results into a bunch of _if/_else statements and
+    continuous assignments to the output. So it should called in context of combinational procedural
+    block.
+
+    :param input: 16 bits net with compressed instruction.
+    :param output: 30 bits net with decompressed instruction. Two LSB always are 'b11 for 32 bits
+        instruction, so do not use them.
+    """
+    selTree = SelectionTree.Generate(commands16.values())
+    selTree.Synthesize(input, output)
+
+
+#XXX
 def GenerateTestCpp(outputPath: str):
      with open(outputPath, "w") as f:
         f.write("// Do not edit! This file is generated by gen_decompressor.py\n\n")

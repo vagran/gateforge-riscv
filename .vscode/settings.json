@@ -61,6 +61,7 @@
     },
     "python.analysis.include": [
         "/home/artyom/projects/fpga/gateforge_riscv/src",
+        "/home/artyom/projects/fpga/gateforge_riscv/test",
         "/home/artyom/projects/fpga/source_gateforge/src"
     ]
 }

@@ -1,4 +1,3 @@
-import io
 from pathlib import Path
 import struct
 import unittest
@@ -6,12 +5,8 @@ import unittest
 from gateforge.compiler import CompileModule
 from gateforge.core import RenderOptions
 from gateforge.verilator import VerilatorParams
-from testbench import TestbenchModule, disableVerilatorTests
-
-
-class NullOutput(io.StringIO):
-    def write(self, _, /):
-        pass
+from testbench import TestbenchModule
+from utils import NullOutput, disableVerilatorTests
 
 
 class Memory:
