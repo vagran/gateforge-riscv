@@ -10,7 +10,7 @@ import re
 import subprocess
 from typing import Any, Optional, Sequence
 
-from gateforge.core import Expression, InputNet, OutputNet, Wire
+from gateforge.core import Expression, InputNet, OutputNet, Reg, Wire
 from gateforge.dsl import _else, _if, concat, const
 
 args: Any = None
@@ -967,42 +967,6 @@ class CommandTransform:
         return BitStringToBytes(s)
 
 
-    #XXX
-    def GenerateVerilogExpression(self, inputVarName: str) -> str:
-        """
-        :param inputVarName: 16 bits opcode variable name.
-        :return: Expression for decompressed 30 bits opcode (assume two LSB is 2'b11)
-        """
-        s = "{"
-        isFirst = True
-        lastComp = self.components[len(self.components) - 1]
-        if not isinstance(lastComp, ConstantBits):
-            raise Exception("Expected constant bits in last component")
-        trimmedLastComp = lastComp.Slice(lastComp.size - 1, 2)
-        for c in self.components:
-            if c is lastComp:
-                c = trimmedLastComp
-            if not isFirst:
-                s += ", "
-            else:
-                isFirst = False
-            if isinstance(c, ConstantBits):
-                s += f"{c.size}'b{c.GetBitString()}"
-            elif isinstance(c, BitsCopy):
-                if c.numReplicate is None:
-                    if c.srcLo == c.srcHi:
-                        s += f"{inputVarName}[{c.srcHi}]"
-                    else:
-                        s += f"{inputVarName}[{c.srcHi}:{c.srcLo}]"
-                else:
-                    s += f"{{{c.numReplicate}{{{inputVarName}[{c.srcHi}]}}}}"
-
-            else:
-                raise Exception("Unexpected component type")
-        s += "}"
-        return s
-
-
     def SynthesizeExpression(self, input: InputNet[Wire, 16]) -> Expression:
         result: list[Expression] = []
         lastComp = self.components[len(self.components) - 1]
@@ -1065,49 +1029,6 @@ def Assemble(commandText: str, isCompressed: bool, tmpObjFileName: Optional[str]
         os.remove(objFileName)
 
 
-#XXX
-def DoSelfTest() -> None:
-    for cmdName in commands16.keys():
-        print(f"\n========================= {cmdName} =========================")
-        cmd = commands16[cmdName]
-        tcs = cmd.GenerateTestCases()
-        for tc in tcs:
-            print(f"[{cmd}] {tc}")
-            asm = cmd.GenerateAsm(tc)
-            print(asm)
-            asmB = Assemble(asm, True)
-            opc = cmd.GenerateOpcode(tc)
-            if asmB != opc:
-                raise Exception("Assembled opcode does not match the generated one: "  +
-                                f"{asmB.hex(' ')} vs {opc.hex(' ')}")
-
-            # Compile base instruction
-            assert cmd.mapTo is not None
-            baseCmd = cmd.mapTo.targetCmd
-            baseBindings = Bindings()
-            baseBindings.Extend(tc)
-            baseBindings.Extend(cmd.mapTo.bindings)
-            print(baseBindings)
-            asm = baseCmd.GenerateAsm(baseBindings)
-            print(asm)
-            asmB = Assemble(asm, True)
-            if asmB != opc:
-                raise Exception("Assembled base opcode does not match the generated one: "  +
-                                f"{asmB.hex(' ')} vs {opc.hex(' ')}")
-            opc32 = baseCmd.GenerateOpcode(baseBindings)
-            asmB = Assemble(asm, False)
-            if asmB != opc32:
-                raise Exception("Assembled full base opcode does not match the generated one: "  +
-                                f"{asmB.hex(' ')} vs {opc32.hex(' ')}")
-
-            t = CommandTransform(cmd)
-            decompressed = t.Apply(opc)
-            if decompressed != opc32:
-                raise Exception(f"Bad decompressed value: {decompressed.hex(' ')} != {opc32.hex(' ')}")
-
-    print("Self-testing successfully completed")
-
-
 class SelectionTree:
     """Contains logic for identifying input 16-bits command.
     """
@@ -1145,18 +1066,7 @@ class SelectionTree:
             return abs(len(self.first) - len(self.second)) < abs(len(node.first) - len(node.second))
 
 
-        #XXX
-        def GetConditionExpr(self, varName: str) -> str:
-            """
-            :param varName: Variable name which stores 16-bits opcode.
-            :return: String with Verilog expression for `if` statement.
-            """
-            if self.loBit == self.hiBit:
-                return f"{varName}[{self.hiBit}]"
-            return f"{varName}[{self.hiBit}:{self.loBit}] != {self.notEqualValue}"
-
-
-        def GetConditionExpr_new(self, cmd16net: InputNet[Wire, 16]) -> Expression:
+        def GetConditionExpr(self, cmd16net: InputNet[Wire, 16]) -> Expression:
             if self.loBit == self.hiBit:
                 return cmd16net[self.hiBit]
             return cmd16net[self.hiBit:self.loBit] != self.notEqualValue
@@ -1293,17 +1203,7 @@ class SelectionTree:
         return node
 
 
-    #XXX
-    def GenerateVerilog(self, insn16VarName: str, insn32VarName: str) -> str:
-        """
-        :param insn16VarName: Name for input variable which stores 16-bits opcode.
-        :param insn32VarName: Name for output variable which stores 32-bits opcode.
-        :return: String with Verilog code for decompressing 16-bits instruction.
-        """
-        return self._GenerateNodeVerilog(self.rootNode, insn16VarName, insn32VarName, 0)
-
-
-    def Synthesize(self, input: InputNet[Wire, 16], output: OutputNet[Wire, 32]):
+    def Synthesize(self, input: InputNet[Wire, 16], output: OutputNet[Reg, 32]):
         """
         Synthesizes decompression logic. Should be called in context of combinational procedural
         block.
@@ -1313,9 +1213,9 @@ class SelectionTree:
         self._SynthesizeNode(self.rootNode, input, output)
 
 
-    def _SynthesizeNode(self, node: "Node", insn16: InputNet[Wire, 16], insn32: OutputNet[Wire, 32]):
+    def _SynthesizeNode(self, node: "Node", insn16: InputNet[Wire, 16], insn32: OutputNet[Reg, 32]):
 
-        with _if(node.GetConditionExpr_new(insn16)):
+        with _if(node.GetConditionExpr(insn16)):
 
             if isinstance(node.first, CommandDesc):
                 assert node.first.mapTo is not None
@@ -1346,46 +1246,7 @@ class SelectionTree:
                 self._SynthesizeNode(node.second, insn16, insn32)
 
 
-    #XXX
-    def _GenerateNodeVerilog(self, node: "Node", insn16VarName: str, insn32VarName: str,
-                             indent: int) -> str:
-        INDENT = "    "
-        _indent = INDENT * indent
-        s = ""
-        s += f"{_indent}if ({node.GetConditionExpr(insn16VarName)}) begin\n"
-        if isinstance(node.first, CommandDesc):
-            assert node.first.mapTo is not None
-            s += f"{_indent + INDENT}// {node.first} -> {node.first.mapTo.targetCmd}\n"
-            t = CommandTransform(node.first)
-            s += f"{_indent + INDENT}{insn32VarName} = {t.GenerateVerilogExpression(insn16VarName)};\n"
-        else:
-            assert isinstance(node.first, SelectionTree.Node)
-            s += self._GenerateNodeVerilog(node.first, insn16VarName, insn32VarName, indent + 1)
-
-        s += f"{_indent}end else begin\n"
-
-        if isinstance(node.second, CommandDesc):
-            assert node.second.mapTo is not None
-            s += f"{_indent + INDENT}// {node.second} -> {node.second.mapTo.targetCmd}\n"
-            t = CommandTransform(node.second)
-            s += f"{_indent + INDENT}{insn32VarName} = {t.GenerateVerilogExpression(insn16VarName)};\n"
-        else:
-            assert isinstance(node.second, SelectionTree.Node)
-            s += self._GenerateNodeVerilog(node.second, insn16VarName, insn32VarName, indent + 1)
-
-        s += f"{_indent}end\n"
-        return s
-
-
-#XXX
-def GenerateVerilogDecompressor(outputPath: str):
-    selTree = SelectionTree.Generate(commands16.values())
-    with open(outputPath, "w") as f:
-        f.write("// Do not edit! This file is generated by gen_decompressor.py\n\n")
-        f.write(selTree.GenerateVerilog("insn16", "insn32"))
-
-
-def Synthesize(input: InputNet[Wire, 16], output: OutputNet[Wire, 30]):
+def Synthesize(input: InputNet[Wire, 16], output: OutputNet[Reg, 30]):
     """Synthesize decompressor logic. It results into a bunch of _if/_else statements and
     continuous assignments to the output. So it should called in context of combinational procedural
     block.
@@ -1398,57 +1259,5 @@ def Synthesize(input: InputNet[Wire, 16], output: OutputNet[Wire, 30]):
     selTree.Synthesize(input, output)
 
 
-#XXX
-def GenerateTestCpp(outputPath: str):
-     with open(outputPath, "w") as f:
-        f.write("// Do not edit! This file is generated by gen_decompressor.py\n\n")
-
-        for cmdName in commands16.keys():
-            cmd = commands16[cmdName]
-            tcs = cmd.GenerateTestCases()
-            for tc in tcs:
-                opc16 = cmd.GenerateOpcode(tc)
-                assert cmd.mapTo is not None
-                baseCmd = cmd.mapTo.targetCmd
-                baseBindings = Bindings()
-                baseBindings.Extend(tc)
-                baseBindings.Extend(cmd.mapTo.bindings)
-                opc32 = baseCmd.GenerateOpcode(baseBindings)
-                f.write(f"TEST_CASE(\"{cmd.GenerateAsm(tc)} => {baseCmd.GenerateAsm(baseBindings)}\",\n")
-                f.write(f"          ({', '.join(map(hex, opc16))}), ({', '.join(map(hex, opc32))}))\n\n")
-
-
 DefineCommands32()
 DefineCommands16()
-
-#XXX
-def Main():
-    global args
-
-    parser = argparse.ArgumentParser(description="Generate opcodes decompressor and tests")
-    parser.add_argument("--doSelfTest", action="store_true")
-    parser.add_argument("--compiler", metavar="COMPILER_PATH", type=str,
-                        help="Compiler path for self-testing")
-    parser.add_argument("--objdump", metavar="OBJDUMP_PATH", type=str,
-                        help="objdump path for self-testing")
-    parser.add_argument("--decompOut", metavar="DECOMP_CODE_PATH", type=str,
-                        help="Path to Verilog file with generated decompressor code")
-    parser.add_argument("--testCppOut", metavar="TEST_CODE_PATH", type=str,
-                        help="Path to C++ file with generated test data code")
-
-    args = parser.parse_args()
-
-    # DefineCommands32()
-    # DefineCommands16()
-    if args.doSelfTest:
-        DoSelfTest()
-
-    if args.decompOut:
-        GenerateVerilogDecompressor(args.decompOut)
-
-    if args.testCppOut:
-        GenerateTestCpp(args.testCppOut)
-
-
-if __name__ == "__main__":
-    Main()
