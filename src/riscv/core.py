@@ -18,8 +18,8 @@ class DebugBus(Bus["DebugBus"]):
 
     def CreatePorts(self, addrSize):
         with namespace("DebugBus"):
-            self.Construct(decodedInsn=wire(32, "decodedInsn").output.port,
-                           pc=wire(addrSize, "pc").output.port)
+            self.Construct(decodedInsn=wire("decodedInsn", 32).output.port,
+                           pc=wire("pc", addrSize).output.port)
 
 
 class MemoryInterface(Interface["MemoryInterface"]):
@@ -90,11 +90,11 @@ class RiscvCpu:
 
         with namespace("RiscvCpu"):
 
-            self.memAddress = reg(memIface.addrSize, "memAddress")
+            self.memAddress = reg("memAddress", memIface.addrSize)
             self.memValid = reg("memValid")
             #XXX direct mux?
-            self.memDataWrite = reg(32, "memDataWrite")
-            self.memWriteMask = reg(4, "memWriteMask")
+            self.memDataWrite = reg("memDataWrite", 32)
+            self.memWriteMask = reg("memWriteMask", 4)
 
             self.insnFetched = reg("insnFetched")
 
@@ -104,12 +104,12 @@ class RiscvCpu:
                                           dataWrite=self.memDataWrite,
                                           writeMask=self.memWriteMask)
 
-            self.pc = reg(self.memIface.addrSize, "pc")
+            self.pc = reg("pc", self.memIface.addrSize)
             if self.dbg is not None:
                 self.dbg.pc <<= self.pc
 
             #XXX
-            self.insn = reg(32, "insn")
+            self.insn = reg("insn", 32)
             if self.dbg is not None:
                 self.dbg.decodedInsn <<= self.insn
 

@@ -1069,6 +1069,7 @@ class SelectionTree:
         def GetConditionExpr(self, cmd16net: InputNet[Wire, 16]) -> Expression:
             if self.loBit == self.hiBit:
                 return cmd16net[self.hiBit]
+            assert self.notEqualValue is not None
             return cmd16net[self.hiBit:self.loBit] != self.notEqualValue
 
 

@@ -25,11 +25,10 @@ class Testbench:
             valid=wire("memValid").output.port,
             insn=wire("memInsn").output.port,
             ready=wire("memReady").input.port,
-            address=wire(self.memIface.addrSize, "memAddress").output.port,
-            dataWrite=wire(32, "memDataWrite").output.port,
-            dataRead=wire(32, "memDataRead").input.port,
-            writeMask=wire(4, "memWriteMask").output.port
-        )
+            address=wire("memAddress", self.memIface.addrSize).output.port,
+            dataWrite=wire("memDataWrite", 32).output.port,
+            dataRead=wire("memDataRead", 32).input.port,
+            writeMask=wire("memWriteMask", 4).output.port)
 
         self.cpu()
 

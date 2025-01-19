@@ -67,8 +67,8 @@ class TestWithAssembler(TestBase):
 
 
 def DecompressorTestbench():
-    cmd16 = wire(16, "cmd16").input.port
-    cmd32 = wire(32, "cmd32").output.port
+    cmd16 = wire("cmd16", 16).input.port
+    cmd32 = wire("cmd32", 32).output.port
     cmd30 = reg(30)
     with always_comb():
         Synthesize(cmd16, cmd30)
