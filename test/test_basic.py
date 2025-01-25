@@ -1,12 +1,10 @@
-from pathlib import Path
 import struct
 import unittest
 
 from gateforge.compiler import CompileModule
 from gateforge.core import RenderOptions
-from gateforge.verilator import VerilatorParams
 from testbench import TestbenchModule
-from utils import NullOutput, disableVerilatorTests
+from utils import GetVerilatorParams, NullOutput, disableVerilatorTests, workspaceDir
 
 
 class Memory:
@@ -52,17 +50,15 @@ class Memory:
 
 class TestBase(unittest.TestCase):
     def setUp(self):
-        wspDir = Path(__file__).parent / "workspace"
-        verilatorParams = VerilatorParams(buildDir=str(wspDir), quite=False)
         self.result = CompileModule(TestbenchModule, NullOutput(),
                                     renderOptions=RenderOptions(sourceMap=True),
-                                    verilatorParams=verilatorParams)
+                                    verilatorParams=GetVerilatorParams())
         self.sim = self.result.simulationModel
         self.ports = self.sim.ports
         self.mem = Memory(0x10000)
         self.clk = 0
         self.sim.Eval()
-        self.sim.OpenVcd(wspDir / "test.vcd")
+        self.sim.OpenVcd(workspaceDir / "test.vcd")
 
 
     def tearDown(self):
