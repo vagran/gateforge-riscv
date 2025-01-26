@@ -75,7 +75,7 @@ class TestBase(unittest.TestCase):
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
-class Basic(TestBase):
+class Test(TestBase):
 
     def test_basic(self):
         self.mem.Write(0, 0xdeadbeef)

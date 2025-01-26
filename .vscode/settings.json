@@ -42,6 +42,7 @@
         "Riscv",
         "rsdp",
         "SLLI",
+        "Sltu",
         "SRAI",
         "SRLI",
         "SWSP",

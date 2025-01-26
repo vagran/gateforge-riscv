@@ -24,26 +24,13 @@ class Testbench:
 
     def __call__(self):
 
-        outOr = wire("outOr", SIZE).output.port
-        outOr <<= self.alu.outOr
-
-        outAnd = wire("outAnd", SIZE).output.port
-        outAnd <<= self.alu.outAnd
-
-        outXor = wire("outXor", SIZE).output.port
-        outXor <<= self.alu.outXor
-
-        outAddSub = wire("outAddSub", SIZE).output.port
-        outAddSub <<= self.alu.outAddSub
-
-        outZ = wire("outZ").output.port
-        outZ <<= self.alu.outZ
-
-        outLt = wire("outLt").output.port
-        outLt <<= self.alu.outLt
-
-        outLtu = wire("outLtu").output.port
-        outLtu <<= self.alu.outLtu
+        wire("outOr", SIZE).output.port <<= self.alu.outOr
+        wire("outAnd", SIZE).output.port <<= self.alu.outAnd
+        wire("outXor", SIZE).output.port <<= self.alu.outXor
+        wire("outAddSub", SIZE).output.port <<= self.alu.outAddSub
+        wire("outZ").output.port <<= self.alu.outZ
+        wire("outLt").output.port <<= self.alu.outLt
+        wire("outLtu").output.port <<= self.alu.outLtu
 
         self.alu()
 
@@ -51,7 +38,7 @@ class Testbench:
 
 
     @staticmethod
-    def Module():
+    def AluModule():
         Testbench()()
 
 
@@ -62,7 +49,7 @@ def signExtend(value, size):
 
 class TestBase(unittest.TestCase):
     def setUp(self):
-        self.result = CompileModule(Testbench.Module, NullOutput(),
+        self.result = CompileModule(Testbench.AluModule, NullOutput(),
                                     renderOptions=RenderOptions(sourceMap=True),
                                     verilatorParams=GetVerilatorParams())
         self.sim = self.result.simulationModel

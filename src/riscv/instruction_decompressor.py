@@ -10,7 +10,7 @@ import re
 import subprocess
 from typing import Any, Optional, Sequence
 
-from gateforge.core import Expression, InputNet, OutputNet, Reg, Wire
+from gateforge.core import Const, Expression, InputNet, OutputNet, Reg, Wire
 from gateforge.dsl import _else, _if, concat, const
 
 args: Any = None
@@ -1042,7 +1042,7 @@ class SelectionTree:
         second: "Optional[list[CommandDesc] | CommandDesc | SelectionTree.Node]"
         hiBit: int
         loBit: int
-        notEqualValue: Optional[int]
+        notEqualValue: Optional[Const] = None
 
 
         def __init__(self, hiBit, loBit=None, notEqualValue=None) -> None:
@@ -1052,7 +1052,8 @@ class SelectionTree:
             self.second = None
             self.hiBit = hiBit
             self.loBit = loBit if loBit is not None else hiBit
-            self.notEqualValue = notEqualValue
+            if notEqualValue is not None:
+                self.notEqualValue = const(notEqualValue, self.hiBit - self.loBit + 1)
 
 
         def HasBetterBalance(self, node: "SelectionTree.Node") -> bool:

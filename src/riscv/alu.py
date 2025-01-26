@@ -26,13 +26,13 @@ class Alu:
     _carry: List[Wire]
 
 
-    def __init__(self, inA: Net, inB: Net, isSub: Net, *, size: int = 32):
+    def __init__(self, *, inA: Net, inB: Net, isSub: Net, size: int = 32):
         self.size = size
         self.inA = inA
         self.inB = inB
         self.isSub = isSub
 
-        with namespace("RiscvAlu"):
+        with namespace("Alu"):
             self.outOr = wire("outOr", size)
             self.outAnd = wire("outAnd", size)
             self.outXor = wire("outXor", size)
