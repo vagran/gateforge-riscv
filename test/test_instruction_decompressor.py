@@ -1,15 +1,55 @@
 # mypy: disable-error-code="type-arg, valid-type"
+import os
 from pathlib import Path
+import re
 import struct
+import subprocess
+from typing import Optional
 import unittest
 
 from gateforge.compiler import CompileModule
 from gateforge.core import RenderOptions
 from gateforge.dsl import always_comb, const, reg, wire
 from gateforge.verilator import VerilatorParams
-from riscv.instruction_decompressor import Assemble, Bindings, CommandTransform, Synthesize, \
-    commands16
+from riscv.instruction_decompressor import Bindings, CommandTransform, Synthesize, commands16
 from test.utils import NullOutput, disableVerilatorTests
+
+
+def Assemble(commandText: str, isCompressed: bool, tmpObjFileName: Optional[str] = None) -> bytes:
+    """Assemble instruction into op-codes. Used for testing.
+    :param commandText: Command test in assembler language.
+    :param embeddedTarget: True to target RV32EC, false for RV32E.
+    :return bytes for the command.
+    """
+
+
+    code = f"""
+.text
+{commandText}
+    """
+    compiler = os.environ["GF_TEST_CC"]
+    objdump = os.environ["GF_TEST_OBJDUMP"]
+    objFileName = tmpObjFileName if tmpObjFileName is not None else "/tmp/decompressor_test.o"
+    subprocess.run([compiler, "-c", "--target=riscv32",
+                    "-march=rv32e" + ("c" if isCompressed else ""),
+                    "-mno-relax", "-mlittle-endian", "-x", "assembler", "-o", objFileName, "-"],
+                   input=code.encode("UTF-8"), check=True)
+
+    p = subprocess.run([objdump, "--disassemble", objFileName],
+                       check=True, capture_output=True)
+
+    output = p.stdout.decode("utf-8")
+    pat = re.compile(r"^\s*\d+:\s+((?:[a-f0-9]{2}\s)+).*$")
+    try:
+        for line in output.splitlines():
+            m = pat.fullmatch(line)
+            if m is None:
+                continue
+            print(line)
+            return bytes(reversed([int(h, base=16) for h in m.group(1).split()]))
+        raise Exception("Failed to find compiled opcodes")
+    finally:
+        os.remove(objFileName)
 
 
 class TestBase(unittest.TestCase):
