@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from typing import Optional
 from gateforge.concepts import Bus, Interface
 from gateforge.core import Expression, InputNet, Net, OutputNet, Reg, Wire
-from gateforge.dsl import _else, _elseif, _if, always, always_comb, concat, const, namespace, reg, wire
+from gateforge.dsl import _else, _elseif, _if, always, always_comb, concat, const, namespace, reg, \
+    verilator_lint_off, wire
 
 
 @dataclass
@@ -14,16 +15,19 @@ class RiscvParams:
     isCompressedIsa = False
     # RV32E profile
     isEmbedded: bool = False
+    hasEbreak: bool = False
 
 
 class DebugBus(Bus["DebugBus"]):
     pc: OutputNet[Wire]
     decodedInsn: OutputNet[Wire, 32]
+    ebreak: OutputNet[Reg]
 
     def CreatePorts(self, addrSize):
         with namespace("DebugBus"):
             self.Construct(decodedInsn=wire("decodedInsn", 32).output.port,
-                           pc=wire("pc", addrSize).output.port)
+                           pc=wire("pc", addrSize).output.port,
+                           ebreak=reg("ebreak").output.port)
 
 
 class MemoryInterface(Interface["MemoryInterface"]):
@@ -49,6 +53,7 @@ class MemoryInterface(Interface["MemoryInterface"]):
 class ControlInterface(Interface["ControlInterface"]):
     reset: InputNet[Wire]
     clk: InputNet[Wire]
+    trap: OutputNet[Wire]
 
 
     def __init__(self):
@@ -81,20 +86,24 @@ class InsnDecoder:
     transferWord: Wire
     # Extend sign bits when loading byte or half-word.
     isLoadSigned: Wire
+
+    isLui: Wire
+    isSlt: Wire
+    isSltu: Wire
+    isEbreak: Wire
+
     # Immediate value if any.
     immediate: Reg[32]
-    isLui: Wire
+
     rs1Idx: Wire
     rs2Idx: Wire
     rdIdx: Wire
     # ALU operation.
     isAluOp: Wire
-    # ALU operation code if `isAluOp` is true.
+    # ALU operation code if `isAluOp` is true. See `AluOp`.
     aluOp: Wire[4]
-    # True operation with rs1 and immediate value, false if operation on rs1 and rs2.
+    # True if second operand for ALU is immediate value, else `rs2`.
     isAluImmediate: Wire
-    isSlt: Wire
-    isSltu: Wire
 
     _input: Net[(31, 2)]
     _regIdxBits: int
@@ -122,6 +131,7 @@ class InsnDecoder:
             self.isAluImmediate = wire("isAluImmediate")
             self.isSlt = wire("isSlt")
             self.isSltu = wire("isSltu")
+            self.isEbreak = wire("isEbreak")
 
 
     def __call__(self):
@@ -164,21 +174,49 @@ class InsnDecoder:
         self.isSlt <<= self.aluOp[2:0] == AluOp.SLT[2:0]
         self.isSltu <<= self.aluOp[2:0] == AluOp.SLTU[2:0]
 
+        self.isEbreak <<= self._input == const("30'b000000000001000000000000011100")
+
 
 class RiscvCpu:
     params: RiscvParams
+    # Number of bits PC register is aligned to (those last bits are not stored)
+    pcAlignBits: int
+    # Number of bits to address registers (depends on RV32E extension).
+    regIdxBits: int
+
     ctrlIface: ControlInterface
     memIface: MemoryInterface
     dbg: Optional[DebugBus]
 
-    pc: Reg
-    insn: Reg
-    insnFetched: Reg
     memAddress: Reg
     memValid: Reg
     memWData: Reg
     memWriteMask: Reg
+
+    pc: Reg
+
+    insn: Reg[32]
     insnDecoder: InsnDecoder
+
+    # True when `insn` contains current instruction and `insnDecoder` has decoded parameters
+    # available.
+    insnFetched: Reg
+
+    # Main execution steps below
+    # Fetching registers (actually operands `rs1` and `rs2`) either from register file, decoded
+    # immediate or PC.
+    stateRegFetch: Reg
+    # Fetching data from memory. May be omitted for unrelated instructions.
+    stateDataFetch: Reg
+    # Store data either to memory or register file. PC may be written as well for branch
+    # instructions.
+    stateWriteBack: Reg
+
+    stateTrap: Reg
+
+    # Fetched operands.
+    rs1: Reg[32]
+    rs2: Reg[32]
 
 
     def __init__(self, *, params: RiscvParams, ctrlIface: ControlInterface,
@@ -195,6 +233,9 @@ class RiscvCpu:
         self.ctrlIface = ctrlIface
         self.memIface = memIface
 
+        self.pcAlignBits = 1 if params.isCompressedIsa else 2
+        self.regIdxBits = 4 if self.params.isEmbedded else 5
+
         if params.debug:
             if debugBus is None:
                 self.dbg = DebugBus()
@@ -210,32 +251,42 @@ class RiscvCpu:
             self.memDataWrite = reg("memDataWrite", 32)
             self.memWriteMask = reg("memWriteMask", 4)
 
+            self.pc = reg("pc", self.memIface.addrSize - self.pcAlignBits)
+            if self.dbg is not None:
+                self.dbg.pc <<= self.pc % const(0, self.pcAlignBits)
+
             self.insnFetched = reg("insnFetched")
 
+            #XXXX
             self.memIface.internal.Assign(valid=self.memValid,
-                                          insn=~self.insnFetched,
+                                          insn=~self.insnFetched,#XXX
                                           address=self.memAddress,
                                           dataWrite=self.memDataWrite,
                                           writeMask=self.memWriteMask)
-
-            self.pc = reg("pc", self.memIface.addrSize)
-            if self.dbg is not None:
-                self.dbg.pc <<= self.pc
 
             #XXX
             self.insn = reg("insn", 32)
             if self.dbg is not None:
                 self.dbg.decodedInsn <<= self.insn
 
-            self.insnDecoder = InsnDecoder(input=self.insn[31:2],
-                                           regIdxBits = 4 if self.params.isEmbedded else 5)
+            self.insnDecoder = InsnDecoder(input=self.insn[31:2], regIdxBits=self.regIdxBits)
+
+            self.stateRegFetch = reg("stateRegFetch")
+            self.stateDataFetch = reg("stateDataFetch")
+            self.stateWriteBack = reg("stateWriteBack")
+            self.stateTrap = reg("stateTrap")
+
+            self.ctrlIface.trap <<= self.stateTrap
+
+            self.rs1 = reg("rs1", 32)
+            self.rs2 = reg("rs2", 32)
 
 
     def __call__(self):
 
         self.insnDecoder()
 
-        with always(self.ctrlIface.clk.negedge):
+        with always(self.ctrlIface.clk.posedge):
             with _if(self.ctrlIface.reset):
                 self._HandleReset()
             with _else():
@@ -249,11 +300,38 @@ class RiscvCpu:
 
     def _HandleState(self):
 
-        with _if(~self.insnFetched):
-            self.memAddress <<= self.pc
+        with _if(self.insnFetched):
+            self._ExecuteInstruction()
+
+        with _else():
+            #XXX compressed instructions fetched by words
+            with verilator_lint_off("WIDTH"):
+                self.memAddress <<= self.pc
             self.memValid <<= True
 
             with _if(self.memIface.ready):
                 self.insn <<= self.memIface.dataRead
                 self.insnFetched <<= True
                 self.pc <<= self.pc + 1 #XXX
+                self.stateRegFetch <<= True
+
+
+    def _ExecuteInstruction(self):
+
+        with _if(self.stateTrap):
+            pass
+
+        with _elseif(self.stateRegFetch):
+            self._HandelRegFetch()
+
+
+    def _HandelRegFetch(self):
+
+        if self.params.hasEbreak:
+            with _if(self.insnDecoder.isEbreak):
+                self.stateTrap <<= True
+                if self.dbg is not None:
+                    self.dbg.ebreak <<= True
+
+        #XXX
+        self.stateTrap <<= True

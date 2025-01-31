@@ -1,8 +1,10 @@
 import struct
+from typing import Sequence
 import unittest
 
 from gateforge.compiler import CompileModule
 from gateforge.core import RenderOptions
+from riscv.instruction_set import Assemble as asm
 from testbench import TestbenchModule
 from utils import GetVerilatorParams, NullOutput, disableVerilatorTests, workspaceDir
 
@@ -37,6 +39,11 @@ class Memory:
         self.buf[offset:offset+4] = struct.pack("<I", value)
 
 
+    def WriteBytes(self, address: int, data: bytes):
+        for i in range(len(data)):
+            self.buf[address + i] = data[i]
+
+
     def HandleSim(self, ports):
         if ports.memValid != 1:
             return
@@ -55,7 +62,8 @@ class TestBase(unittest.TestCase):
                                     verilatorParams=GetVerilatorParams())
         self.sim = self.result.simulationModel
         self.ports = self.sim.ports
-        self.mem = Memory(0x10000)
+        self.memSize = 1024 * 1024
+        self.mem = Memory(self.memSize)
         self.clk = 0
         self.sim.Eval()
         self.sim.OpenVcd(workspaceDir / "test.vcd")
@@ -74,10 +82,62 @@ class TestBase(unittest.TestCase):
         self.sim.DumpVcd()
 
 
+    def SetProgram(self, program: Sequence[bytes]):
+        data = b"".join(program)
+        self.programSize = len(data)
+        self.mem.WriteBytes(0, data)
+
+
+    def WaitEbreak(self):
+        while self.ports.DebugBus_ebreak == 0:
+            if self.ports.trap != 0:
+                self.fail("Unexpected trap")
+            self.Tick()
+
+
+TEST_DATA_ADDR=0x102408
+
+
+def LuiAddiImm(value: int) -> tuple[int, int]:
+    """
+    :return: Values to pass as immediate value to LUI/ADDI commands to get the specified
+        32 bits immediate value in the target register at the end.
+    """
+    value = value & 0xFFFFFFFF
+    luiImm = (value >> 12) & 0xFFFFF # Upper 20 bits
+    addiImm = value & 0xFFF # Lower 12 bits
+
+    # Check if lower 12 bits represent a negative value in 12-bit context
+
+    if (addiImm & 0x800) and (value >> 31):
+        # If sign bit set in 12-bit and original value negative
+        luiImm = (luiImm + 1) & 0xFFFFF # Adjust upper immediate
+        addiImm -= 0x1000 # Convert to negative offset
+
+    return luiImm, addiImm
+
+
+def LuiImm(value: int) -> int:
+    return LuiAddiImm(value)[0]
+
+def AddiImm(value: int) -> int:
+    return LuiAddiImm(value)[1]
+
+
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class Test(TestBase):
 
-    def test_basic(self):
-        self.mem.Write(0, 0xdeadbeef)
-        while self.ports.memInsn:
-            self.Tick()
+    def test_sw(self):
+
+        testValue = 0xdeadbeef
+
+        self.SetProgram([
+            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
+            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            asm("LUI", imm=LuiImm(testValue), rd=11),
+            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            asm("SW", imm=0x14, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()

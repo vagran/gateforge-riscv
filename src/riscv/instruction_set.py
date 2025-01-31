@@ -622,8 +622,26 @@ def DefineCommands32():
     cmd("LW",
         imm(11,0), rs1(), b("010"), rd(), b("0000011"),
         isImmOffset=True)
+    cmd("LH",
+        imm(11,0), rs1(), b("001"), rd(), b("0000011"),
+        isImmOffset=True)
+    cmd("LB",
+        imm(11,0), rs1(), b("000"), rd(), b("0000011"),
+        isImmOffset=True)
+    cmd("LHU",
+        imm(11,0), rs1(), b("101"), rd(), b("0000011"),
+        isImmOffset=True)
+    cmd("LBU",
+        imm(11,0), rs1(), b("100"), rd(), b("0000011"),
+        isImmOffset=True)
     cmd("SW",
         imm(11,5), rs2(), rs1(), b("010"), imm(4,0), b("0100011"),
+        isImmOffset=True)
+    cmd("SH",
+        imm(11,5), rs2(), rs1(), b("001"), imm(4,0), b("0100011"),
+        isImmOffset=True)
+    cmd("SB",
+        imm(11,5), rs2(), rs1(), b("000"), imm(4,0), b("0100011"),
         isImmOffset=True)
     cmd("JAL",
         imm(20), imm(10,1), imm(11), imm(19,12), rd(), b("1101111"))
@@ -656,6 +674,8 @@ def DefineCommands32():
     cmd("AND",
         b("0000000"), rs2(), rs1(), b("111"), rd(), b("0110011"))
 
+    cmd("EBREAK", b("000000000001"), b("00000"), b("000"), b("00000"), b("1110011"))
+
 
 def DefineCommands16():
     cmd = cmd16
@@ -669,7 +689,6 @@ def DefineCommands16():
         b("110"), uimm(5,3), rs1p(), uimm(2), uimm(6), rs2p(), b("00"),
         isImmOffset=True)
 
-    # No special handling for C.NOP - translate it to `ADDI x0, x0, 0` to save resources
     cmd("C.ADDI", mapTo("ADDI"),
         b("000"), imm(5), rsd(), imm(4,0), b("01"))
     cmd("C.JAL", mapTo("JAL", [(rd(), 1)]),
@@ -1207,7 +1226,7 @@ class SelectionTree:
                 self._SynthesizeNode(node.second, insn16, insn32)
 
 
-def Synthesize(input: InputNet[Wire, 16], output: OutputNet[Reg, 30]):
+def SynthesizeDecompressor(input: InputNet[Wire, 16], output: OutputNet[Reg, 30]):
     """Synthesize decompressor logic. It results into a bunch of _if/_else statements and
     continuous assignments to the output. So it should called in context of combinational procedural
     block.
@@ -1222,3 +1241,27 @@ def Synthesize(input: InputNet[Wire, 16], output: OutputNet[Reg, 30]):
 
 DefineCommands32()
 DefineCommands16()
+
+
+def Assemble(name: str, *, imm: Optional[int] = None, rs1: Optional[int] = None,
+             rs2: Optional[int] = None, rd: Optional[int] = None) -> bytes:
+
+    name = name.upper()
+    if name in commands16:
+        cmd = commands16[name]
+    elif name in commands32:
+        cmd = commands32[name]
+    else:
+        raise Exception(f"Unrecognized command name: {name}")
+
+    b = Bindings()
+    if imm is not None:
+        b.Append((ImmediateBits(), imm))
+    if rs1 is not None:
+        b.Append((RegReference(RegType.SRC1), rs1))
+    if rs2 is not None:
+        b.Append((RegReference(RegType.SRC2), rs2))
+    if rd is not None:
+        b.Append((RegReference(RegType.DST), rd))
+
+    return cmd.GenerateOpcode(b)

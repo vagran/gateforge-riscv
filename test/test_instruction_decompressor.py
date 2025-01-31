@@ -11,7 +11,7 @@ from gateforge.compiler import CompileModule
 from gateforge.core import RenderOptions
 from gateforge.dsl import always_comb, const, reg, wire
 from gateforge.verilator import VerilatorParams
-from riscv.instruction_decompressor import Bindings, CommandTransform, Synthesize, commands16
+from riscv.instruction_set import Bindings, CommandTransform, SynthesizeDecompressor, commands16
 from test.utils import NullOutput, disableVerilatorTests
 
 
@@ -111,7 +111,7 @@ def DecompressorTestbench():
     cmd32 = wire("cmd32", 32).output.port
     cmd30 = reg(30)
     with always_comb():
-        Synthesize(cmd16, cmd30)
+        SynthesizeDecompressor(cmd16, cmd30)
     cmd32 <<= cmd30 % const("2'b11")
 
 
