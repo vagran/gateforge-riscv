@@ -19,7 +19,7 @@ def Assemble(commandText: str, isCompressed: bool, tmpObjFileName: Optional[str]
     """Assemble instruction into op-codes. Used for testing.
     :param commandText: Command test in assembler language.
     :param embeddedTarget: True to target RV32EC, false for RV32E.
-    :return bytes for the command.
+    :return bytes for the command (big-endian BO).
     """
 
 

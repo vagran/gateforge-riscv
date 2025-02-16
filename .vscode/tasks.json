@@ -49,7 +49,7 @@
         {
             "label": "Run specific unit test",
             "command": "${workspaceFolder}/.venv/bin/python",
-            "args": ["-m", "unittest", "test.test_basic.Test.test_basic"],
+            "args": ["-m", "unittest", "test.test_basic.Test.test_sw"],
             "options": {
                 "cwd": "${workspaceFolder}",
                 "env": {

@@ -244,7 +244,7 @@ class CommandDesc:
 
     def GenerateOpcode(self, bindings: Bindings) -> bytes:
         """
-        :return: Opcode bytes.
+        :return: Opcode bytes (big-endian BO).
         """
 
         # First generate bit string, MSB to LSB
@@ -1245,6 +1245,10 @@ DefineCommands16()
 
 def Assemble(name: str, *, imm: Optional[int] = None, rs1: Optional[int] = None,
              rs2: Optional[int] = None, rd: Optional[int] = None) -> bytes:
+
+    """
+    :returns: OP-code bytes (big-endian BO).
+    """
 
     name = name.upper()
     if name in commands16:

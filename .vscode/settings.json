@@ -39,6 +39,7 @@
         "posedge",
         "PULLMODE",
         "pyftdi",
+        "regs",
         "Riscv",
         "rsdp",
         "SLLI",

@@ -44,15 +44,21 @@ class Memory:
             self.buf[address + i] = data[i]
 
 
+    def ReadWord(self, address) -> int:
+        return struct.unpack("<I", self.buf[address: address + 4])[0]
+
+
     def HandleSim(self, ports):
         if ports.memValid != 1:
+            ports.memDataRead = 0
+            ports.memReady = False
             return
         mask = ports.memWriteMask
         if mask == 0:
             ports.memDataRead = self.Read(ports.memAddress)
         else:
             self.Write(ports.memAddress, ports.memDataWrite, mask)
-        ports.memReady = 1
+        ports.memReady = True
 
 
 class TestBase(unittest.TestCase):
@@ -82,10 +88,26 @@ class TestBase(unittest.TestCase):
         self.sim.DumpVcd()
 
 
-    def SetProgram(self, program: Sequence[bytes]):
-        data = b"".join(program)
+    def Reset(self):
+        self.ports.reset = True
+        self.Tick()
+        self.Tick()
+        self.ports.reset = False
+
+
+    def SetProgram(self, program: Sequence[bytes], reset = True):
+        # Convert to little-endian
+        opCodes = list(map(lambda op: bytes(reversed(op)), program))
+        offset = 0
+        for opCode in opCodes:
+            print(f"{offset:04x}: {opCode.hex(" ", 1)}")
+            offset += len(opCode)
+        data = b"".join(opCodes)
         self.programSize = len(data)
         self.mem.WriteBytes(0, data)
+
+        if reset:
+            self.Reset()
 
 
     def WaitEbreak(self):
@@ -114,7 +136,7 @@ def LuiAddiImm(value: int) -> tuple[int, int]:
         luiImm = (luiImm + 1) & 0xFFFFF # Adjust upper immediate
         addiImm -= 0x1000 # Convert to negative offset
 
-    return luiImm, addiImm
+    return luiImm << 12, addiImm
 
 
 def LuiImm(value: int) -> int:
@@ -141,3 +163,5 @@ class Test(TestBase):
         ])
 
         self.WaitEbreak()
+
+        self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR + 0x14))
