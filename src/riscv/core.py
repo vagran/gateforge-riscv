@@ -15,7 +15,7 @@ class RiscvParams:
     # Generate debug ports to expose internal state.
     debug: bool = False
     # RV32C profile
-    isCompressedIsa = False
+    hasCompressedIsa: bool = False
     # RV32E profile
     isEmbedded: bool = False
     hasEbreak: bool = False
@@ -122,6 +122,11 @@ class AluOp:
     SRA =  const("4'b1101")
     OR =   const("4'b0110")
     AND =  const("4'b0111")
+
+
+def IsCompressedInsn(opCode: Expression) -> Expression[1]:
+    ":returns: True if compressed instruction op-code."
+    return opCode[1:0] != const("2'b11")
 
 
 class InsnDecoder:
@@ -257,8 +262,6 @@ class RiscvCpu:
 
     # Pre-fetched 16 bits high-order half-word of next instruction. Used only with compressed ISA.
     insnHi: Reg[16]
-    # `insnHi` has valid content.
-    insnHiValid: Reg
 
     insn: Reg[32]
 
@@ -267,6 +270,9 @@ class RiscvCpu:
     # True when `insn` contains current instruction and `insnDecoder` has decoded parameters
     # available.
     insnFetched: Reg
+    # True when fetching unaligned instruction (not 32-bits aligned). Valid only with compressed
+    # ISA.
+    unalignedInsnFetch: Reg
 
     # Main execution steps below
     # Fetching registers (actually operands `rs1` and `rs2`) either from register file, decoded
@@ -305,7 +311,7 @@ class RiscvCpu:
         """
         self.params = params
 
-        self.pcAlignBits = 1 if params.isCompressedIsa else 2
+        self.pcAlignBits = 1 if params.hasCompressedIsa else 2
         self.regIdxBits = 4 if self.params.isEmbedded else 5
 
         self.ctrlIface = ctrlIface
@@ -340,18 +346,18 @@ class RiscvCpu:
 
         #XXXX
         self.memIface.internal.Assign(valid=self.memValid,
-                                      insn=~self.insnFetched,#XXX
+                                      insn=~self.insnFetched,
                                       address=self.memAddress,
                                       dataWrite=self.memDataWrite,
                                       writeMask=self.memWriteMask)
 
         self.insn = reg("insn", 32)
 
-        if self.params.isCompressedIsa:
+        if self.params.hasCompressedIsa:
             self.insnHi = reg("insnHi", 16)
-            self.insnHiValid = reg("insnHiValid")
+            self.unalignedInsnFetch = reg("unalignedInsnFetch")
 
-            decompressedInsn = wire("decompressedInsn", 30)
+            decompressedInsn = reg("decompressedInsn", 30)
             with always_comb():
                 SynthesizeDecompressor(self.insn[15:0], decompressedInsn)
 
@@ -422,8 +428,8 @@ class RiscvCpu:
 
         self.insnFetched <<= False
         self.pc <<= 0
-        if self.params.isCompressedIsa:
-            self.insnHiValid <<= False
+        if self.params.hasCompressedIsa:
+            self.unalignedInsnFetch <<= False
 
         self.stateRegFetch <<= False
         self.stateDataFetch <<= False
@@ -431,13 +437,14 @@ class RiscvCpu:
 
         self.regFetchLatched <<= False
 
-        self._FetchInstruction()
-
 
     def _HandleState(self):
 
         with _if(self.insnFetched):
             self._HandleInstruction()
+
+        with _elseif(~self.memValid):
+            self._FetchInstruction()
 
         with _else():
             self._HandleInstructionFetch()
@@ -447,11 +454,13 @@ class RiscvCpu:
 
         # XXX if not branching
         with _if(~self.isPcSet):
-            if self.params.isCompressedIsa:
-                #XXX
-                pass
+            if self.params.hasCompressedIsa:
+                with _if(IsCompressedInsn(self.insn)):
+                    self.pc <<= self.pc + 1
+                with _else():
+                    self.pc <<= self.pc + 2
             else:
-                self.pc <<= self.pc + 1 #XXX
+                self.pc <<= self.pc + 1
             self.isPcSet <<= True
 
         with _if (self.stateRegFetch):
@@ -518,10 +527,35 @@ class RiscvCpu:
 
     # Initiate instruction fetching
     def _FetchInstruction(self):
-        if not self.params.isCompressedIsa:
+        self.insnFetched <<= False
+
+        if not self.params.hasCompressedIsa:
             self.memAddress <<= self.pc
             self.memValid <<= True
             return
+
+        with _if(self.pc[0]):
+            # Unaligned fetch
+
+            with _if(self.insnFetched):
+                self.insn[15:0] <<= self.insnHi
+                with _if(IsCompressedInsn(self.insnHi)):
+                    self.insnFetched <<= True
+                    self._ExecuteInstruction()
+                with _else():
+                    self.unalignedInsnFetch <<= True
+                    self.memAddress <<= self.pc[:1] + 1
+                    self.memValid <<= True
+
+            with _else():
+                self.memAddress <<= self.pc[:1]
+                self.memValid <<= True
+
+
+        with _else():
+            self.memAddress <<= self.pc[:1]
+            self.memValid <<= True
+
 
 
     def _HandleInstructionFetch(self):
@@ -529,10 +563,33 @@ class RiscvCpu:
 
             self.memValid <<= False
 
-            if not self.params.isCompressedIsa:
+            if not self.params.hasCompressedIsa:
                 self.insn <<= self.memIface.dataRead
                 self.insnFetched <<= True
                 self._ExecuteInstruction()
                 return
 
-            #XXX
+            with _if(self.pc[0]):
+                # Unaligned fetch
+
+                with _if(self.unalignedInsnFetch):
+                    self.insn[31:16] <<= self.memIface.external.dataRead[15:0]
+                    self.insnHi <<= self.memIface.external.dataRead[31:16]
+                    self.insnFetched <<= True
+                    self.unalignedInsnFetch <<= False
+                    self._ExecuteInstruction()
+
+                with _else():
+                    self.insn[15:0] <<= self.memIface.external.dataRead[31:16]
+
+                    with _if(IsCompressedInsn(self.memIface.external.dataRead[31:16])):
+                        self.insnFetched <<= True
+                    with _else():
+                        self.unalignedInsnFetch <<= True
+                        self.memAddress <<= self.pc[:1] + 1
+                        self.memValid <<= True
+
+            with _else():
+                self.insn <<= self.memIface.external.dataRead
+                self.insnFetched <<= True
+                self._ExecuteInstruction()

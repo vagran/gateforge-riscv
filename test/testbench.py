@@ -7,8 +7,8 @@ class Testbench:
     ctrlIface: ControlInterface
     memIface: MemoryInterface
 
-    def __init__(self):
-        params = RiscvParams(debug=True, hasEbreak=True)
+    def __init__(self, hasCompressedIsa: bool):
+        params = RiscvParams(debug=True, hasEbreak=True, hasCompressedIsa=hasCompressedIsa)
         self.ctrlIface = ControlInterface()
         self.memIface = MemoryInterface(20)
         self.cpu = RiscvCpu(params=params, ctrlIface=self.ctrlIface, memIface=self.memIface)
@@ -36,5 +36,5 @@ class Testbench:
         return self
 
 
-def TestbenchModule():
-    return Testbench()()
+def TestbenchModule(hasCompressedIsa: bool = False):
+    return Testbench(hasCompressedIsa=hasCompressedIsa)()

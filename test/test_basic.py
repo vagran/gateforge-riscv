@@ -62,10 +62,13 @@ class Memory:
 
 
 class TestBase(unittest.TestCase):
+    hasCompressedIsa = False
+
     def setUp(self):
         self.result = CompileModule(TestbenchModule, NullOutput(),
                                     renderOptions=RenderOptions(sourceMap=True),
-                                    verilatorParams=GetVerilatorParams())
+                                    verilatorParams=GetVerilatorParams(),
+                                    moduleKwargs={"hasCompressedIsa": self.hasCompressedIsa})
         self.sim = self.result.simulationModel
         self.ports = self.sim.ports
         self.memSize = 1024 * 1024
@@ -150,6 +153,47 @@ def AddiImm(value: int) -> int:
 class Test(TestBase):
 
     def test_sw(self):
+
+        testValue = 0xdeadbeef
+
+        self.SetProgram([
+            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
+            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            asm("LUI", imm=LuiImm(testValue), rd=11),
+            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            asm("SW", imm=0x14, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR + 0x14))
+
+
+@unittest.skipIf(disableVerilatorTests, "Verilator")
+class TestCompressed(TestBase):
+    hasCompressedIsa = True
+
+    def test_uncompressed(self):
+
+        testValue = 0xdeadbeef
+
+        self.SetProgram([
+            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
+            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            asm("LUI", imm=LuiImm(testValue), rd=11),
+            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            asm("SW", imm=0x14, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR + 0x14))
+
+
+    #XXX
+    def test_compressed(self):
 
         testValue = 0xdeadbeef
 
