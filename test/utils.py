@@ -15,5 +15,5 @@ class NullOutput(io.StringIO):
         pass
 
 
-def GetVerilatorParams() -> VerilatorParams:
-    return VerilatorParams(buildDir=str(workspaceDir), quite=False)
+def GetVerilatorParams(testName: str) -> VerilatorParams:
+    return VerilatorParams(buildDir=str(workspaceDir / testName), quite=False)

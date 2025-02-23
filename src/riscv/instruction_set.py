@@ -65,8 +65,6 @@ class Bindings:
                 regList = [RegType.SRC1, RegType.SRC_DST]
             elif ref.regType == RegType.DST:
                 regList = [RegType.DST, RegType.SRC_DST]
-            elif ref.regType == RegType.SRC_DST:
-                regList = [RegType.DST]
             else:
                 regList = [ref.regType]
             predicate = lambda c: isinstance(c, RegReference) and (c.regType in regList)
@@ -1246,7 +1244,8 @@ DefineCommands16()
 
 
 def Assemble(name: str, *, imm: Optional[int] = None, rs1: Optional[int] = None,
-             rs2: Optional[int] = None, rd: Optional[int] = None) -> bytes:
+             rs2: Optional[int] = None, rd: Optional[int] = None,
+             rsd: Optional[int] = None) -> bytes:
 
     """
     :returns: OP-code bytes (big-endian BO).
@@ -1269,5 +1268,7 @@ def Assemble(name: str, *, imm: Optional[int] = None, rs1: Optional[int] = None,
         b.Append((RegReference(RegType.SRC2), rs2))
     if rd is not None:
         b.Append((RegReference(RegType.DST), rd))
+    if rsd is not None:
+        b.Append((RegReference(RegType.SRC_DST), rsd))
 
     return cmd.GenerateOpcode(b)

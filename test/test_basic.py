@@ -74,7 +74,7 @@ class TestBase(unittest.TestCase):
     def setUpClass(cls):
         cls.result = CompileModule(TestbenchModule, NullOutput(),
                                    renderOptions=RenderOptions(sourceMap=True),
-                                   verilatorParams=GetVerilatorParams(),
+                                   verilatorParams=GetVerilatorParams(cls.__name__),
                                    moduleKwargs={"hasCompressedIsa": cls.hasCompressedIsa})
 
 
@@ -162,7 +162,7 @@ def AddiImm(value: int) -> int:
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
-class Test(TestBase):
+class TestNoCompression(TestBase):
 
     def test_sw(self):
 
@@ -298,7 +298,7 @@ class Test(TestBase):
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
-class TestUncompressedOnCompressedIsa(Test):
+class TestUncompressedOnCompressedIsa(TestNoCompression):
     hasCompressedIsa = True
 
 
@@ -333,7 +333,7 @@ class TestCompressed(TestBase):
             asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
             asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
             asm("C.LI", imm=testValue, rd=11),
-            asm("C.ADDI", imm=2, rd=11),
+            asm("C.ADDI", imm=2, rsd=11),
             asm("SW", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])

@@ -118,7 +118,7 @@ def DecompressorTestbench():
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestWithVerilator(TestBase):
     def setUp(self):
-        wspDir = Path(__file__).parent / "workspace"
+        wspDir = Path(__file__).parent / "workspace" / "TestInstructionDecompressor"
         verilatorParams = VerilatorParams(buildDir=str(wspDir), quite=False)
         self.result = CompileModule(DecompressorTestbench, NullOutput(),
                                     renderOptions=RenderOptions(sourceMap=True),

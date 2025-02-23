@@ -48,11 +48,18 @@ def signExtend(value, size):
 
 
 class TestBase(unittest.TestCase):
+
+
+    @classmethod
+    def setUpClass(cls):
+        cls.result = CompileModule(Testbench.AluModule, NullOutput(),
+                                   renderOptions=RenderOptions(sourceMap=True),
+                                   verilatorParams=GetVerilatorParams(cls.__name__))
+
+
     def setUp(self):
-        self.result = CompileModule(Testbench.AluModule, NullOutput(),
-                                    renderOptions=RenderOptions(sourceMap=True),
-                                    verilatorParams=GetVerilatorParams())
         self.sim = self.result.simulationModel
+        self.sim.Reload()
         self.ports = self.sim.ports
 
 
