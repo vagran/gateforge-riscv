@@ -286,6 +286,7 @@ class RiscvCpu:
 
     rd: Reg[32]
     writeRd: Reg
+    rdIdx: Reg
 
 
     def __init__(self, *, params: RiscvParams, ctrlIface: ControlInterface,
@@ -375,6 +376,7 @@ class RiscvCpu:
 
         self.rd = reg("rd", 32)
         self.writeRd = reg("writeRd")
+        self.rdIdx = reg("rdIdx", self.regIdxBits)
 
 
     def __call__(self):
@@ -385,7 +387,7 @@ class RiscvCpu:
         self.regFileIface.external.clk <<= self.ctrlIface.clk
         self.regFileIface.external.readAddrA <<= self.insnDecoder.rs1Idx
         self.regFileIface.external.readAddrB <<= self.insnDecoder.rs2Idx
-        self.regFileIface.external.writeAddr <<= self.insnDecoder.rdIdx
+        self.regFileIface.external.writeAddr <<= self.rdIdx
         self.regFileIface.external.writeData <<= self.rd
         self.regFileIface.external.writeEn <<= self.writeRd
 
@@ -473,6 +475,8 @@ class RiscvCpu:
     def _FetchRegs(self):
         #XXX handle PC ops
 
+        self.rdIdx <<= self.insnDecoder.rdIdx
+
         with _if (self.insnDecoder.isLui | self.insnDecoder.isAluOp | self.insnDecoder.isStore):
             self.stateWriteBack <<= True
             self.stateRegFetch <<= False
@@ -551,10 +555,11 @@ class RiscvCpu:
 
         with _if (self.pc[0]):
             # Unaligned fetch
-
             with _if (self.insnFetched):
-                self.insn[15:0] <<= self.insnHi
-                with _if (IsCompressedInsn(self.insnHi)):
+                insnLo = cond(self.unalignedInsnFetch, self.insnHi, self.insn[31:16])
+                self.insn[15:0] <<= insnLo
+                with _if (IsCompressedInsn(insnLo)):
+                    self.unalignedInsnFetch <<= False
                     self.insnFetched <<= True
                     self._ExecuteInstruction()
                 with _else ():
@@ -568,12 +573,15 @@ class RiscvCpu:
 
 
         with _else():
+            # Aligned fetch
             self.memAddress <<= self.pc[:1]
             self.memValid <<= True
 
 
 
     def _HandleInstructionFetch(self):
+        self.writeRd <<= False
+
         with _if (self.memIface.ready):
 
             self.memValid <<= False
@@ -591,7 +599,6 @@ class RiscvCpu:
                     self.insn[31:16] <<= self.memIface.external.dataRead[15:0]
                     self.insnHi <<= self.memIface.external.dataRead[31:16]
                     self.insnFetched <<= True
-                    self.unalignedInsnFetch <<= False
                     self._ExecuteInstruction()
 
                 with _else ():
@@ -605,6 +612,7 @@ class RiscvCpu:
                         self.memValid <<= True
 
             with _else ():
+                # Aligned fetch
                 self.insn <<= self.memIface.external.dataRead
                 self.insnFetched <<= True
                 self._ExecuteInstruction()

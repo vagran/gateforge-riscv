@@ -60,6 +60,14 @@
                     "GF_TEST_OBJDUMP": "/opt/clang-riscv/bin/llvm-objdump"
                 }
             }
+        },
+        {
+            "label": "Assemble",
+            "type": "shell",
+            "command": "bash ${workspaceFolder}/test-data/assemble.sh test.s",
+            "options": {
+                "cwd": "${workspaceFolder}/test-data"
+            }
         }
     ]
 }

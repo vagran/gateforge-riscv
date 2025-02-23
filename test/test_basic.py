@@ -308,13 +308,13 @@ class TestCompressed(TestBase):
 
     def test_c_li(self):
 
-        testValue = 42
+        testValue = 27
         offset = 0x14
 
         self.SetProgram([
             asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
             asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
-            asm("C.LI", imm=42, rd=11),
+            asm("C.LI", imm=testValue, rd=11),
             asm("SW", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])
@@ -322,3 +322,22 @@ class TestCompressed(TestBase):
         self.WaitEbreak()
 
         self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR + offset))
+
+
+    def test_c_li_addi(self):
+
+        testValue = 27
+        offset = 0x14
+
+        self.SetProgram([
+            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
+            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            asm("C.LI", imm=testValue, rd=11),
+            asm("C.ADDI", imm=2, rd=11),
+            asm("SW", imm=offset, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual(testValue + 2, self.mem.ReadWord(TEST_DATA_ADDR + offset))

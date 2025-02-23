@@ -65,6 +65,8 @@ class Bindings:
                 regList = [RegType.SRC1, RegType.SRC_DST]
             elif ref.regType == RegType.DST:
                 regList = [RegType.DST, RegType.SRC_DST]
+            elif ref.regType == RegType.SRC_DST:
+                regList = [RegType.DST]
             else:
                 regList = [ref.regType]
             predicate = lambda c: isinstance(c, RegReference) and (c.regType in regList)
