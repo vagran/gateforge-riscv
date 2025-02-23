@@ -8,7 +8,7 @@ class Testbench:
     memIface: MemoryInterface
 
     def __init__(self, hasCompressedIsa: bool):
-        params = RiscvParams(debug=True, hasEbreak=True, hasCompressedIsa=hasCompressedIsa)
+        params = RiscvParams(hasEbreak=True, hasCompressedIsa=hasCompressedIsa)
         self.ctrlIface = ControlInterface()
         self.memIface = MemoryInterface(20)
         self.cpu = RiscvCpu(params=params, ctrlIface=self.ctrlIface, memIface=self.memIface)
@@ -19,7 +19,8 @@ class Testbench:
         self.ctrlIface.external.Assign(
             reset=wire("reset").input.port,
             clk=wire("clk").input.port,
-            trap=wire("trap").output.port
+            trap=wire("trap").output.port,
+            ebreak=wire("ebreak").output.port
         )
 
         self.memIface.external.Assign(

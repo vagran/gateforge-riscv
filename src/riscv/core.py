@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Optional
 from gateforge.concepts import Bus, Interface
 from gateforge.core import Expression, InputNet, Net, OutputNet, Reg, Wire
-from gateforge.dsl import _else, _elseif, _if, always, always_comb, concat, cond, const, \
+from gateforge.dsl import _case, _else, _elseif, _if, _when, always, always_comb, concat, cond, const, \
     namespace, reg, wire
 
 from riscv.alu import Alu
@@ -12,8 +12,6 @@ from riscv.instruction_set import SynthesizeDecompressor
 
 @dataclass
 class RiscvParams:
-    # Generate debug ports to expose internal state.
-    debug: bool = False
     # RV32C profile
     hasCompressedIsa: bool = False
     # RV32E profile
@@ -21,24 +19,15 @@ class RiscvParams:
     hasEbreak: bool = False
 
 
-class DebugBus(Bus["DebugBus"]):
-    pc: OutputNet[Wire]
-    normalizedInsn: OutputNet[Wire, 32]
-    ebreak: OutputNet[Reg]
-
-    def CreatePorts(self, addrSize):
-        with namespace("DebugBus"):
-            self.Construct(normalizedInsn=wire("normalizedInsn", 32).output.port,
-                           pc=wire("pc", addrSize + 2).output.port,
-                           ebreak=reg("ebreak").output.port)
-
-
 class MemoryInterface(Interface["MemoryInterface"]):
+    # Address size in bits. Memory interface operates with word address, not bytes.
+    addrSize: int
+
     # CPU-originated address is valid, transfer initiated by asserting this signal.
     valid: OutputNet[Wire]
     # Instruction fetch when true, data fetch otherwise.
     insn: OutputNet[Wire]
-    # Requested data is ready on the dataRead lines.
+    # Requested data is ready on the dataRead lines or write transaction complete.
     ready: InputNet[Wire]
 
     # Word address.
@@ -61,6 +50,7 @@ class ControlInterface(Interface["ControlInterface"]):
     reset: InputNet[Wire]
     clk: InputNet[Wire]
     trap: OutputNet[Wire]
+    ebreak: OutputNet[Wire]
 
 
     def __init__(self):
@@ -101,7 +91,7 @@ def CreateDefaultRegFile(regIdxBits: int) -> RegFileInterface:
         regs = reg("regs", 32).array((1 << regIdxBits) - 1)
 
         with always(iface.clk.posedge):
-            with _if(iface.writeEn):
+            with _if (iface.writeEn):
                 regs[~iface.writeAddr] <<= iface.writeData
 
         iface.readDataA <<= regs[~iface.readAddrA]
@@ -226,7 +216,7 @@ class InsnDecoder:
         self.isLui <<= self._input[6:2] == const("5'b01101")
 
         self.isAluOp <<= (self._input[6] == const("1'b0")) & (self._input[4:2] == const("3'b100"))
-        self.isAluRegToReg <<= self._input[5] & ~self.isLui
+        self.isAluRegToReg <<= self.isAluOp & self._input[5]
         # Ignore bit 30 (set to zero in the result) when immediate operation (bit 5 is zero), bit 30
         # is part of immediate value in such case. SRAI is exception, XXX revise
         self.aluOp <<= concat(
@@ -249,7 +239,6 @@ class RiscvCpu:
     ctrlIface: ControlInterface
     memIface: MemoryInterface
     regFileIface: RegFileInterface
-    dbg: Optional[DebugBus]
 
     memAddress: Reg
     memValid: Reg
@@ -287,7 +276,7 @@ class RiscvCpu:
     stateTrap: Reg
 
     # Register fetch data latched on register file interface.
-    regFetchLatched: Reg
+    regFetchLatched: Reg #XXX is needed?
 
     # Aliases for register file interface
     rs1: Wire[32]
@@ -300,8 +289,7 @@ class RiscvCpu:
 
 
     def __init__(self, *, params: RiscvParams, ctrlIface: ControlInterface,
-                 memIface: MemoryInterface, regFileIface: Optional[RegFileInterface] = None,
-                 debugBus: Optional[DebugBus] = None):
+                 memIface: MemoryInterface, regFileIface: Optional[RegFileInterface] = None):
         """_summary_
 
         :param params:
@@ -319,13 +307,6 @@ class RiscvCpu:
         self.regFileIface = regFileIface if regFileIface is not None else \
             CreateDefaultRegFile(self.regIdxBits)
 
-        if params.debug:
-            if debugBus is None:
-                self.dbg = DebugBus()
-                self.dbg.CreatePorts(self.memIface.addrSize)
-            else:
-                self.dbg = debugBus
-
         with namespace("RiscvCpu"):
             self._Setup()
 
@@ -333,14 +314,11 @@ class RiscvCpu:
     def _Setup(self):
         self.memAddress = reg("memAddress", self.memIface.addrSize)
         self.memValid = reg("memValid")
-        #XXX direct mux?
-        self.memDataWrite = reg("memDataWrite", 32)
+        self.memWData = reg("memDataWrite", 32)
         self.memWriteMask = reg("memWriteMask", 4)
 
         self.pc = reg("pc", self.memIface.addrSize + 2 - self.pcAlignBits)
         self.isPcSet = reg("isPcSet")
-        if self.dbg is not None:
-            self.dbg.pc <<= self.pc % const(0, self.pcAlignBits)
 
         self.insnFetched = reg("insnFetched")
 
@@ -348,7 +326,7 @@ class RiscvCpu:
         self.memIface.internal.Assign(valid=self.memValid,
                                       insn=~self.insnFetched,
                                       address=self.memAddress,
-                                      dataWrite=self.memDataWrite,
+                                      dataWrite=self.memWData,
                                       writeMask=self.memWriteMask)
 
         self.insn = reg("insn", 32)
@@ -363,14 +341,10 @@ class RiscvCpu:
 
             # Either decompressed or just fetched.
             normalizedInsn = cond(self.insn[1:0] == 0b11, self.insn[31:2], decompressedInsn)
-            if self.dbg is not None:
-                self.dbg.normalizedInsn <<= normalizedInsn % const(0b11, 2)
 
             self.insnDecoder = InsnDecoder(input=normalizedInsn, regIdxBits=self.regIdxBits)
 
         else:
-            if self.dbg is not None:
-                self.dbg.normalizedInsn <<= self.insn
             self.insnDecoder = InsnDecoder(input=self.insn[31:2], regIdxBits=self.regIdxBits)
 
 
@@ -382,6 +356,7 @@ class RiscvCpu:
         self.regFetchLatched = reg("regFetchLatched")
 
         self.ctrlIface.trap <<= self.stateTrap
+        self.ctrlIface.ebreak <<= self.insnDecoder.isEbreak
 
         self.rs1 = self.regFileIface.external.readDataA
         self.rs2 = self.regFileIface.external.readDataB
@@ -415,12 +390,12 @@ class RiscvCpu:
         self.regFileIface.external.writeEn <<= self.writeRd
 
         with always(self.ctrlIface.clk.posedge):
-            with _if(self.ctrlIface.reset):
+            with _if (self.ctrlIface.reset):
                 self._HandleReset()
-            with _elseif(self.stateTrap):
+            with _elseif (self.stateTrap):
                 #XXX
                 pass
-            with _else():
+            with _else ():
                 self._HandleState()
 
 
@@ -455,9 +430,9 @@ class RiscvCpu:
         # XXX if not branching
         with _if(~self.isPcSet):
             if self.params.hasCompressedIsa:
-                with _if(IsCompressedInsn(self.insn)):
+                with _if (IsCompressedInsn(self.insn)):
                     self.pc <<= self.pc + 1
-                with _else():
+                with _else ():
                     self.pc <<= self.pc + 2
             else:
                 self.pc <<= self.pc + 1
@@ -485,9 +460,8 @@ class RiscvCpu:
 
         if self.params.hasEbreak:
             with _if (self.insnDecoder.isEbreak):
+                #XXX debug support
                 self.stateTrap <<= True
-                if self.dbg is not None:
-                    self.dbg.ebreak <<= True
 
             with _else ():
                 self._FetchRegs()
@@ -499,30 +473,71 @@ class RiscvCpu:
     def _FetchRegs(self):
         #XXX handle PC ops
 
-        with _if (self.insnDecoder.isLui):
+        with _if (self.insnDecoder.isLui | self.insnDecoder.isAluOp | self.insnDecoder.isStore):
             self.stateWriteBack <<= True
             self.stateRegFetch <<= False
 
 
-        with _elseif (self.regFetchLatched):
+        with _elseif (self.regFetchLatched):#XXX is needed?
 
             self.stateRegFetch <<= False
             self.regFetchLatched <<= False
             self.stateTrap <<= True#XXX
 
         with _else ():
-            self.regFetchLatched <<= True
+            self.regFetchLatched <<= True #XXX is needed?
 
 
     def _HandleWriteBack(self):
-        with _if (self.insnDecoder.isLui):
-            self.rd <<= self.alu.outAddSub
 
-        # Register written by a single clock
-        self.writeRd <<= True
-        self.stateWriteBack <<= False
+        with _if (self.memIface.valid & self.memIface.ready):
+            self.memValid <<= False
+            self.stateWriteBack <<= False
+            self.memWriteMask <<= 0
+            self._FetchInstruction()
 
-        self.stateTrap <<= True#XXX
+        with _else ():
+
+            with _if (self.insnDecoder.isLui | self.insnDecoder.isAluOp):
+                self.rd <<= self.alu.outAddSub
+
+                # Register written by a single clock
+                self.writeRd <<= True
+                self.stateWriteBack <<= False
+
+                self._FetchInstruction()
+
+            with _elseif (self.insnDecoder.isStore):
+                self.memAddress <<= self.alu.outAddSub[self.memIface.addrSize+1:2]
+                self.memValid <<= True
+
+                with _if (self.insnDecoder.transferWord):
+                    self.memWData <<= self.rs2
+                    self.memWriteMask <<= 0b1111
+
+                with _if (self.insnDecoder.transferHalfWord):
+                    with _when(self.alu.outAddSub[1]):
+                        with _case(0):
+                            self.memWData <<= const(0, 16) % self.rs2[15:0]
+                            self.memWriteMask <<= 0b0011
+                        with _case(1):
+                            self.memWData <<= self.rs2[15:0] % const(0, 16)
+                            self.memWriteMask <<= 0b1100
+
+                with _if (self.insnDecoder.transferByte):
+                    with _when(self.alu.outAddSub[1:0]):
+                        with _case(0):
+                            self.memWData <<= const(0, 24) % self.rs2[7:0]
+                            self.memWriteMask <<= 0b0001
+                        with _case(1):
+                            self.memWData <<= const(0, 16) % self.rs2[7:0] % const(0, 8)
+                            self.memWriteMask <<= 0b0010
+                        with _case(2):
+                            self.memWData <<= const(0, 8) % self.rs2[7:0] % const(0, 16)
+                            self.memWriteMask <<= 0b0100
+                        with _case(3):
+                            self.memWData <<= self.rs2[7:0] % const(0, 24)
+                            self.memWriteMask <<= 0b1000
 
 
     # Initiate instruction fetching
@@ -534,20 +549,20 @@ class RiscvCpu:
             self.memValid <<= True
             return
 
-        with _if(self.pc[0]):
+        with _if (self.pc[0]):
             # Unaligned fetch
 
-            with _if(self.insnFetched):
+            with _if (self.insnFetched):
                 self.insn[15:0] <<= self.insnHi
-                with _if(IsCompressedInsn(self.insnHi)):
+                with _if (IsCompressedInsn(self.insnHi)):
                     self.insnFetched <<= True
                     self._ExecuteInstruction()
-                with _else():
+                with _else ():
                     self.unalignedInsnFetch <<= True
                     self.memAddress <<= self.pc[:1] + 1
                     self.memValid <<= True
 
-            with _else():
+            with _else ():
                 self.memAddress <<= self.pc[:1]
                 self.memValid <<= True
 
@@ -559,7 +574,7 @@ class RiscvCpu:
 
 
     def _HandleInstructionFetch(self):
-        with _if(self.memIface.ready):
+        with _if (self.memIface.ready):
 
             self.memValid <<= False
 
@@ -569,27 +584,27 @@ class RiscvCpu:
                 self._ExecuteInstruction()
                 return
 
-            with _if(self.pc[0]):
+            with _if (self.pc[0]):
                 # Unaligned fetch
 
-                with _if(self.unalignedInsnFetch):
+                with _if (self.unalignedInsnFetch):
                     self.insn[31:16] <<= self.memIface.external.dataRead[15:0]
                     self.insnHi <<= self.memIface.external.dataRead[31:16]
                     self.insnFetched <<= True
                     self.unalignedInsnFetch <<= False
                     self._ExecuteInstruction()
 
-                with _else():
+                with _else ():
                     self.insn[15:0] <<= self.memIface.external.dataRead[31:16]
 
-                    with _if(IsCompressedInsn(self.memIface.external.dataRead[31:16])):
+                    with _if (IsCompressedInsn(self.memIface.external.dataRead[31:16])):
                         self.insnFetched <<= True
-                    with _else():
+                    with _else ():
                         self.unalignedInsnFetch <<= True
                         self.memAddress <<= self.pc[:1] + 1
                         self.memValid <<= True
 
-            with _else():
+            with _else ():
                 self.insn <<= self.memIface.external.dataRead
                 self.insnFetched <<= True
                 self._ExecuteInstruction()

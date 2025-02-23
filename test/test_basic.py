@@ -2,7 +2,7 @@ import struct
 from typing import Sequence
 import unittest
 
-from gateforge.compiler import CompileModule
+from gateforge.compiler import CompileModule, CompileResult
 from gateforge.core import RenderOptions
 from riscv.instruction_set import Assemble as asm
 from testbench import TestbenchModule
@@ -48,6 +48,10 @@ class Memory:
         return struct.unpack("<I", self.buf[address: address + 4])[0]
 
 
+    def ReadByte(self, address) -> int:
+        return int(self.buf[address])
+
+
     def HandleSim(self, ports):
         if ports.memValid != 1:
             ports.memDataRead = 0
@@ -63,23 +67,31 @@ class Memory:
 
 class TestBase(unittest.TestCase):
     hasCompressedIsa = False
+    result: CompileResult
+
+
+    @classmethod
+    def setUpClass(cls):
+        cls.result = CompileModule(TestbenchModule, NullOutput(),
+                                   renderOptions=RenderOptions(sourceMap=True),
+                                   verilatorParams=GetVerilatorParams(),
+                                   moduleKwargs={"hasCompressedIsa": cls.hasCompressedIsa})
+
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.result.simulationModel.Close()
+
 
     def setUp(self):
-        self.result = CompileModule(TestbenchModule, NullOutput(),
-                                    renderOptions=RenderOptions(sourceMap=True),
-                                    verilatorParams=GetVerilatorParams(),
-                                    moduleKwargs={"hasCompressedIsa": self.hasCompressedIsa})
         self.sim = self.result.simulationModel
+        self.sim.Reload()
         self.ports = self.sim.ports
-        self.memSize = 1024 * 1024
+        self.memSize = 16 * 1024 * 1024
         self.mem = Memory(self.memSize)
         self.clk = 0
         self.sim.Eval()
         self.sim.OpenVcd(workspaceDir / "test.vcd")
-
-
-    def tearDown(self):
-        self.sim.Close()
 
 
     def Tick(self):
@@ -114,7 +126,7 @@ class TestBase(unittest.TestCase):
 
 
     def WaitEbreak(self):
-        while self.ports.DebugBus_ebreak == 0:
+        while self.ports.ebreak == 0:
             if self.ports.trap != 0:
                 self.fail("Unexpected trap")
             self.Tick()
@@ -155,57 +167,158 @@ class Test(TestBase):
     def test_sw(self):
 
         testValue = 0xdeadbeef
+        offset = 0x14
 
         self.SetProgram([
             asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
             asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
             asm("LUI", imm=LuiImm(testValue), rd=11),
             asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
-            asm("SW", imm=0x14, rs1=10, rs2=11),
+            asm("SW", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])
 
         self.WaitEbreak()
 
-        self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR + 0x14))
+        self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR + offset))
+
+
+    def test_sh(self):
+
+        testValue = 0xdeadbeef
+        offset = 0x14
+
+        self.SetProgram([
+            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
+            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            asm("LUI", imm=LuiImm(testValue), rd=11),
+            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            asm("SH", imm=offset, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual(testValue & 0xffff, self.mem.ReadWord(TEST_DATA_ADDR + offset))
+
+
+    def test_sh_hi(self):
+
+        testValue = 0xdeadbeef
+        offset = 0x16
+
+        self.SetProgram([
+            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
+            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            asm("LUI", imm=LuiImm(testValue), rd=11),
+            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            asm("SH", imm=offset, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual((testValue & 0xffff) << 16, self.mem.ReadWord(TEST_DATA_ADDR + offset - 2))
+
+
+    def test_sb(self):
+
+        testValue = 0xdeadbeef
+        offset = 0x14
+
+        self.SetProgram([
+            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
+            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            asm("LUI", imm=LuiImm(testValue), rd=11),
+            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            asm("SB", imm=offset, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual(testValue & 0xff, self.mem.ReadWord(TEST_DATA_ADDR + offset))
+
+
+    def test_sb_1(self):
+
+        testValue = 0xdeadbeef
+        offset = 0x15
+
+        self.SetProgram([
+            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
+            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            asm("LUI", imm=LuiImm(testValue), rd=11),
+            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            asm("SB", imm=offset, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual((testValue & 0xff) << 8, self.mem.ReadWord(TEST_DATA_ADDR + offset - 1))
+
+
+    def test_sb_2(self):
+
+        testValue = 0xdeadbeef
+        offset = 0x16
+
+        self.SetProgram([
+            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
+            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            asm("LUI", imm=LuiImm(testValue), rd=11),
+            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            asm("SB", imm=offset, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual(testValue & 0xff, self.mem.ReadByte(TEST_DATA_ADDR + offset))
+
+
+    def test_sb_3(self):
+
+        testValue = 0xdeadbeef
+        offset = 0x17
+
+        self.SetProgram([
+            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
+            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            asm("LUI", imm=LuiImm(testValue), rd=11),
+            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            asm("SB", imm=offset, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual(testValue & 0xff, self.mem.ReadByte(TEST_DATA_ADDR + offset))
+
+
+@unittest.skipIf(disableVerilatorTests, "Verilator")
+class TestUncompressedOnCompressedIsa(Test):
+    hasCompressedIsa = True
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestCompressed(TestBase):
     hasCompressedIsa = True
 
-    def test_uncompressed(self):
+    def test_c_li(self):
 
-        testValue = 0xdeadbeef
+        testValue = 42
+        offset = 0x14
 
         self.SetProgram([
             asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
             asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
-            asm("LUI", imm=LuiImm(testValue), rd=11),
-            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
-            asm("SW", imm=0x14, rs1=10, rs2=11),
+            asm("C.LI", imm=42, rd=11),
+            asm("SW", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])
 
         self.WaitEbreak()
 
-        self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR + 0x14))
-
-
-    #XXX
-    def test_compressed(self):
-
-        testValue = 0xdeadbeef
-
-        self.SetProgram([
-            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
-            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
-            asm("LUI", imm=LuiImm(testValue), rd=11),
-            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
-            asm("SW", imm=0x14, rs1=10, rs2=11),
-            asm("EBREAK")
-        ])
-
-        self.WaitEbreak()
-
-        self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR + 0x14))
+        self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR + offset))
