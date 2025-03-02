@@ -506,7 +506,15 @@ class RiscvCpu:
                     self.rd <<= const(0, 31) % self.alu.outLt
                 with _elseif (self.insnDecoder.isAluSltu):
                     self.rd <<= const(0, 31) % self.alu.outLtu
-                #XXX shifts
+                # For now always use barrel shifting which is however quite resource consuming.
+                with _elseif (self.insnDecoder.isAluShiftLeft):
+                    self.rd <<= self.alu.inA.sll(self.alu.inB[4:0])
+                with _elseif (self.insnDecoder.isAluShiftRight):
+                    with _if (self.insnDecoder.isAluShiftArithmetic):
+                        self.rd <<= self.alu.inA.sra(self.alu.inB[4:0])
+                    with _else():
+                        self.rd <<= self.alu.inA.srl(self.alu.inB[4:0])
+                #XXX
                 with _else():
                     self.rd <<= 0
 

@@ -491,6 +491,60 @@ class TestNoCompression(TestBase):
         self._TestSlti(0xffffff00, 0xffffff00, True)
 
 
+    def _TestShift(self, v1, v2, op, imm=False):
+        program = [
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(v1, 11)
+        ]
+        if imm:
+            program.append(asm(op + "I", rs1=11, imm=v2, rd=13))
+        else:
+            program.extend([
+                *Li(v2, 12),
+                asm(op, rs1=11, rs2=12, rd=13)
+            ])
+        program.extend([
+            asm("SW", imm=0, rs1=10, rs2=13),
+            asm("EBREAK")
+        ])
+        self.SetProgram(program)
+        self.WaitEbreak()
+
+        if op == "SLL":
+            result = (v1 << v2) & 0xffffffff
+        elif op == "SRL":
+            result = (v1 >> v2) & ((1 << (32 - v2)) - 1)
+        else:
+            result = v1 >> v2
+
+        self.assertEqual(result, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_sll(self):
+        self._TestShift(0xdeadbeef, 5, "SLL")
+
+
+    def test_srl(self):
+        self._TestShift(0xdeadbeef, 5, "SRL")
+
+
+    def test_sra(self):
+        self._TestShift(0xdeadbeef, 5, "SRA")
+
+
+    def test_slli(self):
+        self._TestShift(0xdeadbeef, 5, "SLL", True)
+
+
+    def test_srli(self):
+        self._TestShift(0xdeadbeef, 5, "SRL", True)
+
+
+    def test_srai(self):
+        self._TestShift(0xdeadbeef, 5, "SRA", True)
+
+
+
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestUncompressedOnCompressedIsa(TestNoCompression):
     hasCompressedIsa = True
