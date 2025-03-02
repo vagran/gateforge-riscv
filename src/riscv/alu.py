@@ -1,4 +1,5 @@
 from typing import List
+from gateforge.concepts import ConstructNets
 from gateforge.core import Net, Wire
 from gateforge.dsl import namespace, wire
 
@@ -37,11 +38,8 @@ class Alu:
             self.outAnd = wire("outAnd", size)
             self.outXor = wire("outXor", size)
             self.outAddSub = wire("outAddSub", size)
-            self.outZ = wire("outZ")
-            self.outLt = wire("outLt")
-            self.outLtu = wire("outLtu")
-
             self._carry = [wire(f"_carry{i}") for i in range(size)]
+            ConstructNets(self)
 
 
     def __call__(self):

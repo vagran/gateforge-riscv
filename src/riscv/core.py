@@ -1,7 +1,7 @@
 # mypy: disable-error-code="type-arg, valid-type"
 from dataclasses import dataclass
 from typing import Optional
-from gateforge.concepts import Bus, Interface
+from gateforge.concepts import Bus, ConstructNets, Interface
 from gateforge.core import Expression, InputNet, Net, OutputNet, Reg, Wire
 from gateforge.dsl import _case, _else, _elseif, _if, _when, always, always_comb, concat, cond, const, \
     namespace, reg, wire
@@ -147,42 +147,37 @@ class InsnDecoder:
     aluOp: Wire[4]
 
     # Valid only if `isAluOp` true
+    isAluAdd: Wire
+    isAluSub: Wire
     isAluSlt: Wire
     isAluSltu: Wire
-    #XXX rest
+    isAluXor: Wire
+    isAluOr: Wire
+    isAluAnd: Wire
+    isAluShiftRight: Wire
+    isAluShiftLeft: Wire
+    # Valid if `isAluShiftRight` true
+    isAluShiftArithmetic: Wire
+
 
     # True if ALU operation performed on rs1 and rs2. If false the second operand is immediate value
     # in most cases.
     isAluRegToReg: Wire
 
 
-    _input: Net[(31, 2)]
+    _input: Wire[[31, 2]]
     _regIdxBits: int
 
 
     def __init__(self, *, input: Expression[(31, 2)], regIdxBits: int):
         self._regIdxBits = regIdxBits
         with namespace("InsnDecoder"):
-            self._input = wire("_input", (31, 2))
-            self._input <<= input
-
-            self.isLoad = wire("isLoad")
-            self.isStore = wire("isStore")
-            self.transferByte = wire("transferByte")
-            self.transferHalfWord = wire("transferHalfWord")
-            self.transferWord = wire("transferWord")
-            self.isLoadSigned = wire("isLoadSigned")
-            self.immediate = reg("immediate", 32)
-            self.isLui = wire("isLui")
             self.rs1Idx = wire("rs1Idx", self._regIdxBits)
             self.rs2Idx = wire("rs2Idx", self._regIdxBits)
             self.rdIdx = wire("rdIdx", self._regIdxBits)
-            self.isAluOp = wire("isAluOp")
-            self.aluOp = wire("aluOp", 4)
-            self.isAluRegToReg = wire("isAluRegToReg")
-            self.isAluSlt = wire("isAluSlt")
-            self.isAluSltu = wire("isAluSltu")
-            self.isEbreak = wire("isEbreak")
+            ConstructNets(self)
+
+        self._input <<= input
 
 
     def __call__(self):
@@ -223,8 +218,16 @@ class InsnDecoder:
             (self._input[5] | (self._input[14:12] == const("3'b101"))) & self._input[30],
              self._input[14:12])
 
+        self.isAluAdd <<= self.aluOp == AluOp.ADD
+        self.isAluSub <<= self.aluOp == AluOp.SUB
         self.isAluSlt <<= self.aluOp[2:0] == AluOp.SLT[2:0]
         self.isAluSltu <<= self.aluOp[2:0] == AluOp.SLTU[2:0]
+        self.isAluXor <<= self.aluOp[2:0] == AluOp.XOR[2:0]
+        self.isAluOr <<= self.aluOp[2:0] == AluOp.OR[2:0]
+        self.isAluAnd <<= self.aluOp[2:0] == AluOp.AND[2:0]
+        self.isAluShiftRight <<= self.aluOp[2:0] == AluOp.SRL[2:0]
+        self.isAluShiftArithmetic <<= self.aluOp[3]
+        self.isAluShiftLeft <<= self.aluOp[2:0] == AluOp.SLL[2:0]
 
         self.isEbreak <<= self._input == const("30'b000000000001000000000000011100")
 
@@ -242,8 +245,8 @@ class RiscvCpu:
 
     memAddress: Reg
     memValid: Reg
-    memWData: Reg
-    memWriteMask: Reg
+    memWData: Reg[32]
+    memWriteMask: Reg[4]
 
     pc: Reg
     # PC set for next instruction.
@@ -314,21 +317,8 @@ class RiscvCpu:
 
     def _Setup(self):
         self.memAddress = reg("memAddress", self.memIface.addrSize)
-        self.memValid = reg("memValid")
-        self.memWData = reg("memDataWrite", 32)
-        self.memWriteMask = reg("memWriteMask", 4)
 
         self.pc = reg("pc", self.memIface.addrSize + 2 - self.pcAlignBits)
-        self.isPcSet = reg("isPcSet")
-
-        self.insnFetched = reg("insnFetched")
-
-        #XXXX
-        self.memIface.internal.Assign(valid=self.memValid,
-                                      insn=~self.insnFetched,
-                                      address=self.memAddress,
-                                      dataWrite=self.memWData,
-                                      writeMask=self.memWriteMask)
 
         self.insn = reg("insn", 32)
 
@@ -346,38 +336,38 @@ class RiscvCpu:
             self.insnDecoder = InsnDecoder(input=normalizedInsn, regIdxBits=self.regIdxBits)
 
         else:
+            self.insnHi = None
+            self.unalignedInsnFetch = None
             self.insnDecoder = InsnDecoder(input=self.insn[31:2], regIdxBits=self.regIdxBits)
 
-
-        self.stateRegFetch = reg("stateRegFetch")
-        self.stateDataFetch = reg("stateDataFetch")
-        self.stateWriteBack = reg("stateWriteBack")
-        self.stateTrap = reg("stateTrap")
-
-        self.regFetchLatched = reg("regFetchLatched")
-
-        self.ctrlIface.trap <<= self.stateTrap
-        self.ctrlIface.ebreak <<= self.insnDecoder.isEbreak
+        self.rdIdx = reg("rdIdx", self.regIdxBits)
 
         self.rs1 = self.regFileIface.external.readDataA
         self.rs2 = self.regFileIface.external.readDataB
+
+        ConstructNets(self)
 
         aluInA = wire("aluInA", 32)
         aluInB = wire("aluInB", 32)
         aluIsSub = wire("aluIsSub")
 
         #XXX branching
-        aluIsSub <<= self.insnDecoder.isAluOp & (self.insnDecoder.isAluSlt | self.insnDecoder.isAluSltu)#XXX
+        aluIsSub <<= self.insnDecoder.isAluOp & \
+            (self.insnDecoder.isAluSlt | self.insnDecoder.isAluSltu | self.insnDecoder.isAluSub)#XXX
 
         aluInA <<= self.rs1 #XXX PC
         aluInB <<= cond(self.insnDecoder.isAluRegToReg, self.rs2, self.insnDecoder.immediate)
 
         self.alu = Alu(inA=aluInA, inB=aluInB, isSub=aluIsSub)
 
-        self.rd = reg("rd", 32)
-        self.writeRd = reg("writeRd")
-        self.rdIdx = reg("rdIdx", self.regIdxBits)
+        self.memIface.internal.Assign(valid=self.memValid,
+                                      insn=~self.insnFetched,
+                                      address=self.memAddress,
+                                      dataWrite=self.memWData,
+                                      writeMask=self.memWriteMask)
 
+        self.ctrlIface.trap <<= self.stateTrap
+        self.ctrlIface.ebreak <<= self.insnDecoder.isEbreak
 
     def __call__(self):
 
@@ -503,7 +493,22 @@ class RiscvCpu:
         with _else ():
 
             with _if (self.insnDecoder.isLui | self.insnDecoder.isAluOp):
-                self.rd <<= self.alu.outAddSub
+                with _if (self.insnDecoder.isLui | self.insnDecoder.isAluAdd |
+                         self.insnDecoder.isAluSub):
+                    self.rd <<= self.alu.outAddSub
+                with _elseif (self.insnDecoder.isAluAnd):
+                    self.rd <<= self.alu.outAnd
+                with _elseif (self.insnDecoder.isAluOr):
+                    self.rd <<= self.alu.outOr
+                with _elseif (self.insnDecoder.isAluXor):
+                    self.rd <<= self.alu.outXor
+                with _elseif (self.insnDecoder.isAluSlt):
+                    self.rd <<= const(0, 31) % self.alu.outLt
+                with _elseif (self.insnDecoder.isAluSltu):
+                    self.rd <<= const(0, 31) % self.alu.outLtu
+                #XXX shifts
+                with _else():
+                    self.rd <<= 0
 
                 # Register written by a single clock
                 self.writeRd <<= True

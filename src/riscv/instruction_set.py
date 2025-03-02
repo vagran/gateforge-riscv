@@ -651,8 +651,6 @@ def DefineCommands32():
         imm(12), imm(10,5), rs2(), rs1(), b("000"), imm(4,1), imm(11), b("1100011"))
     cmd("BNE",
         imm(12), imm(10,5), rs2(), rs1(), b("001"), imm(4,1), imm(11), b("1100011"))
-    cmd("ADDI",
-        imm(11,0), rs1(), b("000"), rd(), b("0010011"))
     cmd("LUI",
         imm(31,12), rd(), b("0110111"))
     cmd("SLLI",
@@ -661,6 +659,16 @@ def DefineCommands32():
         b("0000000"), uimm(4,0), rs1(), b("101"), rd(), b("0010011"))
     cmd("SRAI",
         b("0100000"), uimm(4,0), rs1(), b("101"), rd(), b("0010011"))
+    cmd("ADDI",
+        imm(11,0), rs1(), b("000"), rd(), b("0010011"))
+    cmd("SLTI",
+        imm(11,0), rs1(), b("010"), rd(), b("0010011"))
+    cmd("SLTIU",
+        imm(11,0), rs1(), b("011"), rd(), b("0010011"))
+    cmd("XORI",
+        imm(11,0), rs1(), b("100"), rd(), b("0010011"))
+    cmd("ORI",
+        imm(11,0), rs1(), b("110"), rd(), b("0010011"))
     cmd("ANDI",
         imm(11,0), rs1(), b("111"), rd(), b("0010011"))
     cmd("ADD",
@@ -673,6 +681,10 @@ def DefineCommands32():
         b("0000000"), rs2(), rs1(), b("110"), rd(), b("0110011"))
     cmd("AND",
         b("0000000"), rs2(), rs1(), b("111"), rd(), b("0110011"))
+    cmd("SLT",
+        b("0000000"), rs2(), rs1(), b("010"), rd(), b("0110011"))
+    cmd("SLTU",
+        b("0000000"), rs2(), rs1(), b("011"), rd(), b("0110011"))
 
     cmd("EBREAK", b("000000000001"), b("00000"), b("000"), b("00000"), b("1110011"))
 
@@ -1245,10 +1257,10 @@ DefineCommands16()
 
 def Assemble(name: str, *, imm: Optional[int] = None, rs1: Optional[int] = None,
              rs2: Optional[int] = None, rd: Optional[int] = None,
-             rsd: Optional[int] = None) -> bytes:
+             rsd: Optional[int] = None) -> tuple[str, bytes]:
 
     """
-    :returns: OP-code bytes (big-endian BO).
+    :returns: Assembler text and OP-code bytes (big-endian BO).
     """
 
     name = name.upper()
@@ -1271,4 +1283,4 @@ def Assemble(name: str, *, imm: Optional[int] = None, rs1: Optional[int] = None,
     if rsd is not None:
         b.Append((RegReference(RegType.SRC_DST), rsd))
 
-    return cmd.GenerateOpcode(b)
+    return cmd.GenerateAsm(b), cmd.GenerateOpcode(b)

@@ -110,14 +110,16 @@ class TestBase(unittest.TestCase):
         self.ports.reset = False
 
 
-    def SetProgram(self, program: Sequence[bytes], reset = True):
+    def SetProgram(self, program: Sequence[tuple[str, bytes]], reset = True):
         # Convert to little-endian
-        opCodes = list(map(lambda op: bytes(reversed(op)), program))
+
+        print("======= Test code =======")
         offset = 0
-        for opCode in opCodes:
-            print(f"{offset:04x}: {opCode.hex(" ", 1)}")
+        for asm, opCode in program:
+            print(f"{offset:04x}: {bytes(reversed(opCode)).hex(" ", 1):12} {asm}")
             offset += len(opCode)
-        data = b"".join(opCodes)
+
+        data = b"".join(map(lambda op: bytes(reversed(op[1])), program))
         self.programSize = len(data)
         self.mem.WriteBytes(0, data)
 
@@ -161,6 +163,13 @@ def AddiImm(value: int) -> int:
     return LuiAddiImm(value)[1]
 
 
+def Li(value: int, rd: int) -> Sequence[tuple[str, bytes]]:
+    return [
+        asm("LUI", imm=LuiImm(value), rd=rd),
+        asm("ADDI", imm=AddiImm(value), rs1=rd, rd=rd)
+    ]
+
+
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestNoCompression(TestBase):
 
@@ -170,10 +179,8 @@ class TestNoCompression(TestBase):
         offset = 0x14
 
         self.SetProgram([
-            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
-            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
-            asm("LUI", imm=LuiImm(testValue), rd=11),
-            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(testValue, 11),
             asm("SW", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])
@@ -189,10 +196,8 @@ class TestNoCompression(TestBase):
         offset = 0x14
 
         self.SetProgram([
-            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
-            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
-            asm("LUI", imm=LuiImm(testValue), rd=11),
-            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(testValue, 11),
             asm("SH", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])
@@ -208,10 +213,8 @@ class TestNoCompression(TestBase):
         offset = 0x16
 
         self.SetProgram([
-            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
-            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
-            asm("LUI", imm=LuiImm(testValue), rd=11),
-            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(testValue, 11),
             asm("SH", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])
@@ -227,10 +230,8 @@ class TestNoCompression(TestBase):
         offset = 0x14
 
         self.SetProgram([
-            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
-            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
-            asm("LUI", imm=LuiImm(testValue), rd=11),
-            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(testValue, 11),
             asm("SB", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])
@@ -243,13 +244,11 @@ class TestNoCompression(TestBase):
     def test_sb_1(self):
 
         testValue = 0xdeadbeef
-        offset = 0x15
+        offset = 0x14 + 1
 
         self.SetProgram([
-            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
-            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
-            asm("LUI", imm=LuiImm(testValue), rd=11),
-            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(testValue, 11),
             asm("SB", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])
@@ -262,13 +261,11 @@ class TestNoCompression(TestBase):
     def test_sb_2(self):
 
         testValue = 0xdeadbeef
-        offset = 0x16
+        offset = 0x14 + 2
 
         self.SetProgram([
-            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
-            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
-            asm("LUI", imm=LuiImm(testValue), rd=11),
-            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(testValue, 11),
             asm("SB", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])
@@ -281,13 +278,11 @@ class TestNoCompression(TestBase):
     def test_sb_3(self):
 
         testValue = 0xdeadbeef
-        offset = 0x17
+        offset = 0x14 + 3
 
         self.SetProgram([
-            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
-            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
-            asm("LUI", imm=LuiImm(testValue), rd=11),
-            asm("ADDI", imm=AddiImm(testValue), rs1=11, rd=11),
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(testValue, 11),
             asm("SB", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
         ])
@@ -295,6 +290,205 @@ class TestNoCompression(TestBase):
         self.WaitEbreak()
 
         self.assertEqual(testValue & 0xff, self.mem.ReadByte(TEST_DATA_ADDR + offset))
+
+
+    def test_alu(self):
+        v1 = 0xdeadbeef
+        v2 = 0xc001babe
+        v3 = 0xa55aa55a
+        v4 = 42
+        v5 = 37
+        v6 = 0x7bc
+
+        self.SetProgram([
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(v1, 11),
+            *Li(v2, 12),
+            *Li(v3, 13),
+            asm("ADD", rs1=11, rs2=12, rd=11),
+            asm("XOR", rs1=11, rs2=13, rd=11),
+            asm("AND", rs1=12, rs2=13, rd=12),
+            asm("OR", rs1=11, rs2=12, rd=11),
+            asm("ADDI", imm=v4, rs1=11, rd=11),
+            asm("XORI", imm=v5, rs1=11, rd=11),
+            asm("ORI", imm=v6, rs1=11, rd=11),
+            asm("XORI", imm=0xfff, rs1=11, rd=11), # Sign-extends immediate, so it inverts all bits
+            asm("SW", imm=0, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        r11 = v1
+        r12 = v2
+        r13 = v3
+        r11 = (r11 + r12) & 0xffffffff
+        r11 = r11 ^ r13
+        r12 = r12 & r13
+        r11 = r11 | r12
+        r11 = (r11 + v4) & 0xffffffff
+        r11 = r11 ^ v5
+        r11 = r11 | v6
+        r11 = r11 ^ 0xffffffff
+
+        self.WaitEbreak()
+
+        self.assertEqual(r11, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def _TestSlt(self, v1, v2, unsigned=False):
+        self.SetProgram([
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(v1, 11),
+            *Li(v2, 12),
+            asm("SLTU" if unsigned else "SLT", rs1=11, rs2=12, rd=13),
+            asm("SW", imm=0, rs1=10, rs2=13),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual(1 if v1 < v2 else 0, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def _TestSlti(self, v1, v2, unsigned=False):
+        self.SetProgram([
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(v1, 11),
+            asm("SLTIU" if unsigned else "SLTI", rs1=11, imm=v2, rd=13),
+            asm("SW", imm=0, rs1=10, rs2=13),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual(1 if v1 < v2 else 0, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_slt_positive_less(self):
+        self._TestSlt(10, 20)
+
+
+    def test_slt_positive_equal(self):
+        self._TestSlt(10, 10)
+
+
+    def test_slt_positive_greater(self):
+        self._TestSlt(20, 10)
+
+
+    def test_slt_neg_pos_less(self):
+        self._TestSlt(-20, 10)
+
+
+    def test_slt_neg_pos_greater(self):
+        self._TestSlt(10, -20)
+
+
+    def test_slt_negative_equal(self):
+        self._TestSlt(-10, -10)
+
+
+    def test_slt_negative_less(self):
+        self._TestSlt(-20, -10)
+
+
+    def test_slt_negative_greater(self):
+        self._TestSlt(-10, -20)
+
+
+    def test_sltu_positive_less(self):
+        self._TestSlt(10, 20, True)
+
+
+    def test_sltu_positive_equal(self):
+        self._TestSlt(10, 10, True)
+
+
+    def test_sltu_positive_greater(self):
+        self._TestSlt(20, 10, True)
+
+
+    def test_sltu_neg_pos_less(self):
+        self._TestSlt(10, 0xf0000000, True)
+
+
+    def test_sltu_neg_pos_greater(self):
+        self._TestSlt(0xf0000000, 10, True)
+
+
+    def test_sltu_negative_less(self):
+        self._TestSlt(0xf0000000, 0xf1000000, True)
+
+
+    def test_sltu_negative_greater(self):
+        self._TestSlt(0xf1000000, 0xf0000000, True)
+
+
+    def test_sltu_negative_equal(self):
+        self._TestSlt(0xf0000000, 0xf0000000, True)
+
+
+    def test_slti_positive_less(self):
+        self._TestSlti(10, 20)
+
+
+    def test_slti_positive_equal(self):
+        self._TestSlti(10, 10)
+
+
+    def test_slti_positive_greater(self):
+        self._TestSlti(20, 10)
+
+
+    def test_slti_neg_pos_less(self):
+        self._TestSlti(-20, 10)
+
+
+    def test_slti_neg_pos_greater(self):
+        self._TestSlti(10, -20)
+
+
+    def test_slti_negative_equal(self):
+        self._TestSlti(-10, -10)
+
+
+    def test_slti_negative_less(self):
+        self._TestSlti(-20, -10)
+
+
+    def test_slti_negative_greater(self):
+        self._TestSlti(-10, -20)
+
+
+    def test_sltiu_positive_less(self):
+        self._TestSlti(10, 20, True)
+
+
+    def test_sltiu_positive_equal(self):
+        self._TestSlti(10, 10, True)
+
+
+    def test_sltiu_positive_greater(self):
+        self._TestSlti(20, 10, True)
+
+
+    def test_sltiu_neg_pos_less(self):
+        self._TestSlti(10, 0xf00, True)
+
+
+    def test_sltiu_neg_pos_greater(self):
+        self._TestSlti(0xf0000000, 10, True)
+
+
+    def test_sltiu_negative_less(self):
+        self._TestSlti(0xf0000000, 0xffffff10, True)
+
+
+    def test_sltiu_negative_greater(self):
+        self._TestSlti(0xffffff10, 0xffffff00, True)
+
+
+    def test_sltiu_negative_equal(self):
+        self._TestSlti(0xffffff00, 0xffffff00, True)
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
@@ -312,8 +506,7 @@ class TestCompressed(TestBase):
         offset = 0x14
 
         self.SetProgram([
-            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
-            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            *Li(TEST_DATA_ADDR, 10),
             asm("C.LI", imm=testValue, rd=11),
             asm("SW", imm=offset, rs1=10, rs2=11),
             asm("EBREAK")
@@ -330,8 +523,7 @@ class TestCompressed(TestBase):
         offset = 0x14
 
         self.SetProgram([
-            asm("LUI", imm=LuiImm(TEST_DATA_ADDR), rd=10),
-            asm("ADDI", imm=AddiImm(TEST_DATA_ADDR), rs1=10, rd=10),
+            *Li(TEST_DATA_ADDR, 10),
             asm("C.LI", imm=testValue, rd=11),
             asm("C.ADDI", imm=2, rsd=11),
             asm("SW", imm=offset, rs1=10, rs2=11),
