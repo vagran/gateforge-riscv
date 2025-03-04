@@ -52,6 +52,10 @@ class Memory:
         return int(self.buf[address])
 
 
+    def WriteWord(self, address, value):
+        self.buf[address: address + 4] = struct.pack("<I", value)
+
+
     def HandleSim(self, ports):
         if ports.memValid != 1:
             ports.memDataRead = 0
@@ -543,6 +547,86 @@ class TestNoCompression(TestBase):
     def test_srai(self):
         self._TestShift(0xdeadbeef, 5, "SRA", True)
 
+
+    def _TestLoad(self, value: int, size: int, offset: int, isSigned: bool):
+        if size == 8:
+            op = "LB" if isSigned else "LBU"
+        elif size == 16:
+            op = "LH" if isSigned else "LHU"
+        elif size == 32:
+            op = "LW"
+        else:
+            raise Exception("Bad size")
+        mask = (1 << size) - 1
+        value = value & mask
+        baseOffset = 0x14
+        self.mem.WriteWord(TEST_DATA_ADDR + baseOffset, value << (offset * 8))
+
+        self.SetProgram([
+            *Li(TEST_DATA_ADDR, 10),
+            asm(op, rs1=10, imm=baseOffset + offset, rd=11),
+            asm("SW", imm=0, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+        self.WaitEbreak()
+
+        if isSigned:
+            signBit = 1 << (size - 1)
+            if value & signBit != 0:
+                value = value | (0xffffffff & ~mask)
+        self.assertEqual(value, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_lw(self):
+        self._TestLoad(0xdeadbeef, 32, 0, False)
+
+
+    def test_lhu(self):
+        self._TestLoad(0xabcd, 16, 0, False)
+
+
+    def test_lhu_1(self):
+        self._TestLoad(0xabcd, 16, 2, False)
+
+
+    def test_lh(self):
+        self._TestLoad(0xabcd, 16, 0, True)
+
+
+    def test_lh_1(self):
+        self._TestLoad(0xabcd, 16, 2, True)
+
+
+    def test_lbu(self):
+        self._TestLoad(0xab, 8, 0, False)
+
+
+    def test_lbu_1(self):
+        self._TestLoad(0xab, 8, 1, False)
+
+
+    def test_lbu_2(self):
+        self._TestLoad(0xab, 8, 2, False)
+
+
+    def test_lbu_3(self):
+        self._TestLoad(0xab, 8, 3, False)
+
+
+    def test_lb(self):
+        self._TestLoad(0xab, 8, 0, True)
+
+
+    def test_lb_1(self):
+        self._TestLoad(0xab, 8, 1, True)
+
+
+    def test_lb_2(self):
+        self._TestLoad(0xab, 8, 2, True)
+
+
+    def test_lb_3(self):
+        self._TestLoad(0xab, 8, 3, True)
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")

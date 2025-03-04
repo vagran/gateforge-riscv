@@ -249,6 +249,7 @@ class RiscvCpu:
     memWriteMask: Reg[4]
 
     pc: Reg
+    nextPc: Wire
     # PC set for next instruction.
     isPcSet: Reg
 
@@ -280,6 +281,9 @@ class RiscvCpu:
 
     # Register fetch data latched on register file interface.
     regFetchLatched: Reg #XXX is needed?
+
+    # Sign bit for load transfer
+    loadSign: Reg
 
     # Aliases for register file interface
     rs1: Wire[32]
@@ -319,6 +323,7 @@ class RiscvCpu:
         self.memAddress = reg("memAddress", self.memIface.addrSize)
 
         self.pc = reg("pc", self.memIface.addrSize + 2 - self.pcAlignBits)
+        self.nextPc = wire("nextPc", self.pc.vectorSize)
 
         self.insn = reg("insn", 32)
 
@@ -369,8 +374,33 @@ class RiscvCpu:
         self.ctrlIface.trap <<= self.stateTrap
         self.ctrlIface.ebreak <<= self.insnDecoder.isEbreak
 
-    def __call__(self):
+        if self.params.hasCompressedIsa:
+            self.nextPc <<= cond(IsCompressedInsn(self.insn), self.pc + 1, self.pc + 2)
+        else:
+            self.nextPc <<= self.pc + 1
 
+
+        with always_comb():
+            with _if (self.insnDecoder.transferByte):
+                # Load address comes from ALU
+                with _when(self.alu.outAddSub[1:0]):
+                    with _case(0):
+                        self.loadSign <<= self.memIface.dataRead[7]
+                    with _case(1):
+                        self.loadSign <<= self.memIface.dataRead[15]
+                    with _case(2):
+                        self.loadSign <<= self.memIface.dataRead[23]
+                    with _case(3):
+                        self.loadSign <<= self.memIface.dataRead[31]
+            with _if (self.insnDecoder.transferHalfWord):
+                with _when(self.alu.outAddSub[1]):
+                    with _case(0):
+                        self.loadSign <<= self.memIface.dataRead[15]
+                    with _case(1):
+                        self.loadSign <<= self.memIface.dataRead[31]
+
+
+    def __call__(self):
         self.insnDecoder()
         self.alu()
 
@@ -421,21 +451,14 @@ class RiscvCpu:
 
         # XXX if not branching
         with _if(~self.isPcSet):
-            if self.params.hasCompressedIsa:
-                with _if (IsCompressedInsn(self.insn)):
-                    self.pc <<= self.pc + 1
-                with _else ():
-                    self.pc <<= self.pc + 2
-            else:
-                self.pc <<= self.pc + 1
+            self.pc <<= self.nextPc
             self.isPcSet <<= True
 
         with _if (self.stateRegFetch):
             self._HandleRegFetch()
 
         with _elseif (self.stateDataFetch):
-            #XXX
-            pass
+            self._HandleDataFetch()
 
         with _elseif (self.stateWriteBack):
             self._HandleWriteBack()
@@ -471,6 +494,11 @@ class RiscvCpu:
             self.stateWriteBack <<= True
             self.stateRegFetch <<= False
 
+        with _elseif (self.insnDecoder.isLoad):
+            self.memAddress <<= self.alu.outAddSub[self.memIface.addrSize+1:2]
+            self.memValid <<= True
+            self.stateDataFetch <<= True
+            self.stateRegFetch <<= False
 
         with _elseif (self.regFetchLatched):#XXX is needed?
 
@@ -480,6 +508,39 @@ class RiscvCpu:
 
         with _else ():
             self.regFetchLatched <<= True #XXX is needed?
+
+
+    def _HandleDataFetch(self):
+
+        with _if (self.memIface.ready):
+            self.memValid <<= False
+            self.stateDataFetch <<= False
+
+            with _if (self.insnDecoder.transferWord):
+                self.rd <<= self.memIface.dataRead
+
+            with _if (self.insnDecoder.transferHalfWord):
+                with _when(self.alu.outAddSub[1]):
+                    with _case(0):
+                        self.rd[15:0] <<= self.memIface.dataRead[15:0]
+                    with _case(1):
+                        self.rd[15:0] <<= self.memIface.dataRead[31:16]
+                self.rd[31:16] <<= cond(self.insnDecoder.isLoadSigned, self.loadSign.replicate(16), 0)
+
+            with _if (self.insnDecoder.transferByte):
+                with _when(self.alu.outAddSub[1:0]):
+                    with _case(0):
+                        self.rd[7:0] <<= self.memIface.dataRead[7:0]
+                    with _case(1):
+                        self.rd[7:0] <<= self.memIface.dataRead[15:8]
+                    with _case(2):
+                        self.rd[7:0] <<= self.memIface.dataRead[23:16]
+                    with _case(3):
+                        self.rd[7:0] <<= self.memIface.dataRead[31:24]
+                self.rd[31:8] <<= cond(self.insnDecoder.isLoadSigned, self.loadSign.replicate(24), 0)
+
+            self.writeRd <<= True
+            self._FetchInstruction()
 
 
     def _HandleWriteBack(self):
