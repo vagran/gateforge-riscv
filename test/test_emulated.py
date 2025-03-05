@@ -628,6 +628,19 @@ class TestNoCompression(TestBase):
     def test_lb_3(self):
         self._TestLoad(0xab, 8, 3, True)
 
+    def test_auipc(self):
+        offset = 42 * 0x1000
+        self.SetProgram([
+            *Li(TEST_DATA_ADDR, 10),
+            asm("AUIPC", imm=offset, rd=11),
+            asm("SW", imm=0, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        self.assertEqual(offset + 2 * 4, self.mem.ReadWord(TEST_DATA_ADDR))
+
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestUncompressedOnCompressedIsa(TestNoCompression):

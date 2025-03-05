@@ -133,6 +133,7 @@ class InsnDecoder:
 
     isLui: Wire
     isEbreak: Wire
+    isAuipc: Wire
 
     # Immediate value if any.
     immediate: Reg[32]
@@ -169,7 +170,7 @@ class InsnDecoder:
     _regIdxBits: int
 
 
-    def __init__(self, *, input: Expression[(31, 2)], regIdxBits: int):
+    def __init__(self, *, input: Expression[[31, 2]], regIdxBits: int):
         self._regIdxBits = regIdxBits
         with namespace("InsnDecoder"):
             self.rs1Idx = wire("rs1Idx", self._regIdxBits)
@@ -192,13 +193,16 @@ class InsnDecoder:
         self.rs2Idx <<= self._input[20 + self._regIdxBits - 1 : 20]
         self.rdIdx <<= self._input[7 + self._regIdxBits - 1 : 7]
 
+        isUType = wire("isUType")
+        isUType <<= (self._input[6] == 0) & (self._input[4:2] == const("3'b101"))
+
         with always_comb():
             with _if ((self._input[6:2] == const("5'b11001")) |
                       (self._input[6:2] == const("5'b00000")) |
                       (self._input[6:2] == const("5'b00100"))):
                 # I-type
                 self.immediate <<= self._input[31].replicate(20) % self._input[31:20]
-            with _elseif ((self._input[6] == 0) & (self._input[4:2] == const("3'b101"))):
+            with _elseif (isUType):
                 # U-type
                 self.immediate <<= self._input[31:12] % const("12'b0")
             with _elseif (self._input[6:2] == const("5'b01000")):
@@ -208,7 +212,8 @@ class InsnDecoder:
                 #XXX
                 self.immediate <<= 0
 
-        self.isLui <<= self._input[6:2] == const("5'b01101")
+        self.isLui <<= isUType & self._input[5]
+        self.isAuipc <<= isUType & ~self._input[5]
 
         self.isAluOp <<= (self._input[6] == const("1'b0")) & (self._input[4:2] == const("3'b100"))
         self.isAluRegToReg <<= self.isAluOp & self._input[5]
@@ -278,9 +283,6 @@ class RiscvCpu:
     stateWriteBack: Reg
     # Trap is asserted
     stateTrap: Reg
-
-    # Register fetch data latched on register file interface.
-    regFetchLatched: Reg #XXX is needed?
 
     # Sign bit for load transfer
     loadSign: Reg
@@ -360,7 +362,10 @@ class RiscvCpu:
         aluIsSub <<= self.insnDecoder.isAluOp & \
             (self.insnDecoder.isAluSlt | self.insnDecoder.isAluSltu | self.insnDecoder.isAluSub)#XXX
 
-        aluInA <<= self.rs1 #XXX PC
+        pc = const(0, 32 - self.pcAlignBits - self.pc.vectorSize) % self.pc % \
+            const(0, self.pcAlignBits)
+
+        aluInA <<= cond(self.insnDecoder.isAuipc, pc, self.rs1)
         aluInB <<= cond(self.insnDecoder.isAluRegToReg, self.rs2, self.insnDecoder.immediate)
 
         self.alu = Alu(inA=aluInA, inB=aluInB, isSub=aluIsSub)
@@ -431,8 +436,7 @@ class RiscvCpu:
         self.stateRegFetch <<= False
         self.stateDataFetch <<= False
         self.stateWriteBack <<= False
-
-        self.regFetchLatched <<= False
+        self.stateTrap <<= False
 
 
     def _HandleState(self):
@@ -486,28 +490,22 @@ class RiscvCpu:
 
 
     def _FetchRegs(self):
-        #XXX handle PC ops
-
         self.rdIdx <<= self.insnDecoder.rdIdx
 
-        with _if (self.insnDecoder.isLui | self.insnDecoder.isAluOp | self.insnDecoder.isStore):
+        with _if (self.insnDecoder.isAuipc):
+            # Set before PC incremented to next instruction
+            self.rd <<= self.alu.outAddSub
             self.stateWriteBack <<= True
-            self.stateRegFetch <<= False
+
+        with _elseif (self.insnDecoder.isLui | self.insnDecoder.isAluOp | self.insnDecoder.isStore):
+            self.stateWriteBack <<= True
 
         with _elseif (self.insnDecoder.isLoad):
             self.memAddress <<= self.alu.outAddSub[self.memIface.addrSize+1:2]
             self.memValid <<= True
             self.stateDataFetch <<= True
-            self.stateRegFetch <<= False
 
-        with _elseif (self.regFetchLatched):#XXX is needed?
-
-            self.stateRegFetch <<= False
-            self.regFetchLatched <<= False
-            self.stateTrap <<= True#XXX
-
-        with _else ():
-            self.regFetchLatched <<= True #XXX is needed?
+        self.stateRegFetch <<= False
 
 
     def _HandleDataFetch(self):
@@ -553,9 +551,12 @@ class RiscvCpu:
 
         with _else ():
 
-            with _if (self.insnDecoder.isLui | self.insnDecoder.isAluOp):
-                with _if (self.insnDecoder.isLui | self.insnDecoder.isAluAdd |
-                         self.insnDecoder.isAluSub):
+            with _if (self.insnDecoder.isAuipc | self.insnDecoder.isLui | self.insnDecoder.isAluOp):
+                with _if (self.insnDecoder.isAuipc):
+                    # rd is written on REG_FETCH stage before PC was incremented
+                    pass
+                with _elseif (self.insnDecoder.isLui | self.insnDecoder.isAluAdd |
+                          self.insnDecoder.isAluSub):
                     self.rd <<= self.alu.outAddSub
                 with _elseif (self.insnDecoder.isAluAnd):
                     self.rd <<= self.alu.outAnd
@@ -575,9 +576,6 @@ class RiscvCpu:
                         self.rd <<= self.alu.inA.sra(self.alu.inB[4:0])
                     with _else():
                         self.rd <<= self.alu.inA.srl(self.alu.inB[4:0])
-                #XXX
-                with _else():
-                    self.rd <<= 0
 
                 # Register written by a single clock
                 self.writeRd <<= True

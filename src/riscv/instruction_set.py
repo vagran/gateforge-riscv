@@ -326,7 +326,7 @@ class CommandDesc:
                 raise Exception("Failed to match immediate value against bindings")
 
             # C.LUI command expects scaled immediate and negative value as unsigned
-            if self.name == "C.LUI" or self.name == "LUI":
+            if self.name == "C.LUI" or self.name == "LUI" or self.name == "AUIPC":
                 v = v >> 12
                 if v < 0:
                     v = 0x100000 + v
@@ -653,6 +653,8 @@ def DefineCommands32():
         imm(12), imm(10,5), rs2(), rs1(), b("001"), imm(4,1), imm(11), b("1100011"))
     cmd("LUI",
         imm(31,12), rd(), b("0110111"))
+    cmd("AUIPC",
+        imm(31,12), rd(), b("0010111"))
     cmd("SLLI",
         b("0000000"), uimm(4,0), rs1(), b("001"), rd(), b("0010011"))
     cmd("SRLI",
