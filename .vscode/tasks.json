@@ -49,7 +49,7 @@
         {
             "label": "Run specific unit test",
             "command": "${workspaceFolder}/.venv/bin/python",
-            "args": ["-m", "unittest", "test.test_emulated.TestNoCompression.test_jal"],
+            "args": ["-m", "unittest", "test.test_emulated.TestNoCompression.test_jalr"],
             "options": {
                 "cwd": "${workspaceFolder}",
                 "env": {

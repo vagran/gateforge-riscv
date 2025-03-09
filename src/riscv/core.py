@@ -511,7 +511,7 @@ class RiscvCpu:
             self.rd <<= self.alu.outAddSub
             self.stateWriteBack <<= True
 
-        with _elseif (self.insnDecoder.isJal):
+        with _elseif (self.insnDecoder.isJump):
             self.rd <<= const(0, 32 - self.pc.vectorSize - self.pcAlignBits) % self.nextPc % \
                 const(0, self.pcAlignBits)
             self.pc <<= self.alu.outAddSub[self.pc.vectorSize + self.pcAlignBits - 1 : self.pcAlignBits]

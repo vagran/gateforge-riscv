@@ -661,6 +661,25 @@ class TestNoCompression(TestBase):
         self.assertEqual(5 * 4, self.mem.ReadWord(TEST_DATA_ADDR + 4))
 
 
+    def test_jalr(self):
+        testValue = 0xdeadbeef
+        self.SetProgram([
+            *Li(TEST_DATA_ADDR, 10), # 0
+            *Li(testValue, 11), # 2
+            *Li(6 * 4, 13), # 4
+            asm("JALR", imm=(8 - 6) * 4, rs1=13, rd=12), # 6
+            asm("XOR", rs1=11, rs2=11, rd=11), # 7 - return address
+            asm("SW", imm=0, rs1=10, rs2=11), # 8 - jump here
+            asm("SW", imm=4, rs1=10, rs2=12),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+        self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR))
+        # Return address
+        self.assertEqual(7 * 4, self.mem.ReadWord(TEST_DATA_ADDR + 4))
+
+
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestUncompressedOnCompressedIsa(TestNoCompression):
