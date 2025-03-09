@@ -135,6 +135,12 @@ class InsnDecoder:
     isEbreak: Wire
     isAuipc: Wire
 
+    isControlTransfer: Wire
+    isJump: Wire
+    isJal: Wire
+    isJalr: Wire
+    isBranch: Wire
+
     # Immediate value if any.
     immediate: Reg[32]
 
@@ -196,21 +202,31 @@ class InsnDecoder:
         isUType = wire("isUType")
         isUType <<= (self._input[6] == 0) & (self._input[4:2] == const("3'b101"))
 
+        self.isControlTransfer <<= self._input[6:4] == const("3'b110")
+        self.isJump = self.isControlTransfer & self._input[2]
+        self.isJal <<= self.isJump & self._input[3]
+        self.isJalr <<= self.isJump & ~self._input[3]
+        self.isBranch <<= self.isControlTransfer & (self._input[3:2] == const("2'b00"))
+
         with always_comb():
-            with _if ((self._input[6:2] == const("5'b11001")) |
-                      (self._input[6:2] == const("5'b00000")) |
-                      (self._input[6:2] == const("5'b00100"))):
-                # I-type
-                self.immediate <<= self._input[31].replicate(20) % self._input[31:20]
-            with _elseif (isUType):
+            with _if (isUType):
                 # U-type
                 self.immediate <<= self._input[31:12] % const("12'b0")
             with _elseif (self._input[6:2] == const("5'b01000")):
                 # S-type
-                self.immediate <<= self._input[31].replicate(20) % self._input[31:25] % self._input[11:7]
+                self.immediate <<= self._input[31].replicate(20) % self._input[31:25] % \
+                    self._input[11:7]
+            with _elseif (self.isJal):
+                # J-type
+                self.immediate <<= self._input[31].replicate(12) % self._input[19:12] % \
+                    self._input[20] % self._input[30:21] % const(0, 1)
+            with _elseif (self.isBranch):
+                # B-type
+                self.immediate <<= self._input[31].replicate(20) % self._input[7] % \
+                    self._input[30:25] % self._input[11:8] % const(0, 1)
             with _else():
-                #XXX
-                self.immediate <<= 0
+                # I-type
+                self.immediate <<= self._input[31].replicate(20) % self._input[31:20]
 
         self.isLui <<= isUType & self._input[5]
         self.isAuipc <<= isUType & ~self._input[5]
@@ -255,8 +271,6 @@ class RiscvCpu:
 
     pc: Reg
     nextPc: Wire
-    # PC set for next instruction.
-    isPcSet: Reg
 
     # Pre-fetched 16 bits high-order half-word of next instruction. Used only with compressed ISA.
     insnHi: Reg[16]
@@ -362,10 +376,12 @@ class RiscvCpu:
         aluIsSub <<= self.insnDecoder.isAluOp & \
             (self.insnDecoder.isAluSlt | self.insnDecoder.isAluSltu | self.insnDecoder.isAluSub)#XXX
 
+        #XXX use unknown bits for MSBs
         pc = const(0, 32 - self.pcAlignBits - self.pc.vectorSize) % self.pc % \
             const(0, self.pcAlignBits)
 
-        aluInA <<= cond(self.insnDecoder.isAuipc, pc, self.rs1)
+        aluInA <<= cond(self.insnDecoder.isAuipc | self.insnDecoder.isJal | self.insnDecoder.isBranch,
+                        pc, self.rs1)
         aluInB <<= cond(self.insnDecoder.isAluRegToReg, self.rs2, self.insnDecoder.immediate)
 
         self.alu = Alu(inA=aluInA, inB=aluInB, isSub=aluIsSub)
@@ -453,11 +469,6 @@ class RiscvCpu:
 
     def _HandleInstruction(self):
 
-        # XXX if not branching
-        with _if(~self.isPcSet):
-            self.pc <<= self.nextPc
-            self.isPcSet <<= True
-
         with _if (self.stateRegFetch):
             self._HandleRegFetch()
 
@@ -472,7 +483,6 @@ class RiscvCpu:
     # clock.
     def _ExecuteInstruction(self):
         self.stateRegFetch <<= True
-        self.isPcSet <<= False
 
 
     def _HandleRegFetch(self):
@@ -490,11 +500,21 @@ class RiscvCpu:
 
 
     def _FetchRegs(self):
+        #XXX finish control transfers
+        with _if(~self.insnDecoder.isControlTransfer):
+            self.pc <<= self.nextPc
+
         self.rdIdx <<= self.insnDecoder.rdIdx
 
         with _if (self.insnDecoder.isAuipc):
             # Set before PC incremented to next instruction
             self.rd <<= self.alu.outAddSub
+            self.stateWriteBack <<= True
+
+        with _elseif (self.insnDecoder.isJal):
+            self.rd <<= const(0, 32 - self.pc.vectorSize - self.pcAlignBits) % self.nextPc % \
+                const(0, self.pcAlignBits)
+            self.pc <<= self.alu.outAddSub[self.pc.vectorSize + self.pcAlignBits - 1 : self.pcAlignBits]
             self.stateWriteBack <<= True
 
         with _elseif (self.insnDecoder.isLui | self.insnDecoder.isAluOp | self.insnDecoder.isStore):
@@ -549,71 +569,70 @@ class RiscvCpu:
             self.memWriteMask <<= 0
             self._FetchInstruction()
 
-        with _else ():
+        with _elseif (self.insnDecoder.isAuipc | self.insnDecoder.isLui | self.insnDecoder.isAluOp |
+                      self.insnDecoder.isControlTransfer):
+            with _if (self.insnDecoder.isAuipc | self.insnDecoder.isJump):
+                # rd is written on REG_FETCH stage before PC was incremented
+                pass
+            with _elseif (self.insnDecoder.isLui | self.insnDecoder.isAluAdd |
+                        self.insnDecoder.isAluSub):
+                self.rd <<= self.alu.outAddSub
+            with _elseif (self.insnDecoder.isAluAnd):
+                self.rd <<= self.alu.outAnd
+            with _elseif (self.insnDecoder.isAluOr):
+                self.rd <<= self.alu.outOr
+            with _elseif (self.insnDecoder.isAluXor):
+                self.rd <<= self.alu.outXor
+            with _elseif (self.insnDecoder.isAluSlt):
+                self.rd <<= const(0, 31) % self.alu.outLt
+            with _elseif (self.insnDecoder.isAluSltu):
+                self.rd <<= const(0, 31) % self.alu.outLtu
+            # For now always use barrel shifting which is however quite resource consuming.
+            with _elseif (self.insnDecoder.isAluShiftLeft):
+                self.rd <<= self.alu.inA.sll(self.alu.inB[4:0])
+            with _elseif (self.insnDecoder.isAluShiftRight):
+                with _if (self.insnDecoder.isAluShiftArithmetic):
+                    self.rd <<= self.alu.inA.sra(self.alu.inB[4:0])
+                with _else():
+                    self.rd <<= self.alu.inA.srl(self.alu.inB[4:0])
 
-            with _if (self.insnDecoder.isAuipc | self.insnDecoder.isLui | self.insnDecoder.isAluOp):
-                with _if (self.insnDecoder.isAuipc):
-                    # rd is written on REG_FETCH stage before PC was incremented
-                    pass
-                with _elseif (self.insnDecoder.isLui | self.insnDecoder.isAluAdd |
-                          self.insnDecoder.isAluSub):
-                    self.rd <<= self.alu.outAddSub
-                with _elseif (self.insnDecoder.isAluAnd):
-                    self.rd <<= self.alu.outAnd
-                with _elseif (self.insnDecoder.isAluOr):
-                    self.rd <<= self.alu.outOr
-                with _elseif (self.insnDecoder.isAluXor):
-                    self.rd <<= self.alu.outXor
-                with _elseif (self.insnDecoder.isAluSlt):
-                    self.rd <<= const(0, 31) % self.alu.outLt
-                with _elseif (self.insnDecoder.isAluSltu):
-                    self.rd <<= const(0, 31) % self.alu.outLtu
-                # For now always use barrel shifting which is however quite resource consuming.
-                with _elseif (self.insnDecoder.isAluShiftLeft):
-                    self.rd <<= self.alu.inA.sll(self.alu.inB[4:0])
-                with _elseif (self.insnDecoder.isAluShiftRight):
-                    with _if (self.insnDecoder.isAluShiftArithmetic):
-                        self.rd <<= self.alu.inA.sra(self.alu.inB[4:0])
-                    with _else():
-                        self.rd <<= self.alu.inA.srl(self.alu.inB[4:0])
+            # Register written by a single clock
+            self.writeRd <<= True
+            self.stateWriteBack <<= False
 
-                # Register written by a single clock
-                self.writeRd <<= True
-                self.stateWriteBack <<= False
+            self._FetchInstruction()
 
-                self._FetchInstruction()
+        with _elseif (self.insnDecoder.isStore):
+            self.memAddress <<= self.alu.outAddSub[self.memIface.addrSize+1:2]
+            self.memValid <<= True
 
-            with _elseif (self.insnDecoder.isStore):
-                self.memAddress <<= self.alu.outAddSub[self.memIface.addrSize+1:2]
-                self.memValid <<= True
+            with _if (self.insnDecoder.transferWord):
+                self.memWData <<= self.rs2
+                self.memWriteMask <<= 0b1111
 
-                with _if (self.insnDecoder.transferWord):
-                    self.memWData <<= self.rs2
-                    self.memWriteMask <<= 0b1111
+            with _if (self.insnDecoder.transferHalfWord):
+                with _when(self.alu.outAddSub[1]):
+                    with _case(0):
+                        self.memWData <<= const(0, 16) % self.rs2[15:0]
+                        self.memWriteMask <<= 0b0011
+                    with _case(1):
+                        self.memWData <<= self.rs2[15:0] % const(0, 16)
+                        self.memWriteMask <<= 0b1100
 
-                with _if (self.insnDecoder.transferHalfWord):
-                    with _when(self.alu.outAddSub[1]):
-                        with _case(0):
-                            self.memWData <<= const(0, 16) % self.rs2[15:0]
-                            self.memWriteMask <<= 0b0011
-                        with _case(1):
-                            self.memWData <<= self.rs2[15:0] % const(0, 16)
-                            self.memWriteMask <<= 0b1100
-
-                with _if (self.insnDecoder.transferByte):
-                    with _when(self.alu.outAddSub[1:0]):
-                        with _case(0):
-                            self.memWData <<= const(0, 24) % self.rs2[7:0]
-                            self.memWriteMask <<= 0b0001
-                        with _case(1):
-                            self.memWData <<= const(0, 16) % self.rs2[7:0] % const(0, 8)
-                            self.memWriteMask <<= 0b0010
-                        with _case(2):
-                            self.memWData <<= const(0, 8) % self.rs2[7:0] % const(0, 16)
-                            self.memWriteMask <<= 0b0100
-                        with _case(3):
-                            self.memWData <<= self.rs2[7:0] % const(0, 24)
-                            self.memWriteMask <<= 0b1000
+            with _if (self.insnDecoder.transferByte):
+                with _when(self.alu.outAddSub[1:0]):
+                    with _case(0):
+                        self.memWData <<= const(0, 24) % self.rs2[7:0]
+                        self.memWriteMask <<= 0b0001
+                    with _case(1):
+                        self.memWData <<= const(0, 16) % self.rs2[7:0] % const(0, 8)
+                        self.memWriteMask <<= 0b0010
+                    with _case(2):
+                        self.memWData <<= const(0, 8) % self.rs2[7:0] % const(0, 16)
+                        self.memWriteMask <<= 0b0100
+                    with _case(3):
+                        self.memWData <<= self.rs2[7:0] % const(0, 24)
+                        self.memWriteMask <<= 0b1000
 
 
     # Initiate instruction fetching

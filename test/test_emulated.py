@@ -628,6 +628,7 @@ class TestNoCompression(TestBase):
     def test_lb_3(self):
         self._TestLoad(0xab, 8, 3, True)
 
+
     def test_auipc(self):
         offset = 42 * 0x1000
         self.SetProgram([
@@ -640,6 +641,25 @@ class TestNoCompression(TestBase):
         self.WaitEbreak()
 
         self.assertEqual(offset + 2 * 4, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_jal(self):
+        testValue = 0xdeadbeef
+        self.SetProgram([
+            *Li(TEST_DATA_ADDR, 10), # 0
+            *Li(testValue, 11), # 2
+            asm("JAL", imm=(6 - 4) * 4, rd=12), # 4
+            asm("XOR", rs1=11, rs2=11, rd=11), # 5 - return address
+            asm("SW", imm=0, rs1=10, rs2=11), # 6 - jump here
+            asm("SW", imm=4, rs1=10, rs2=12),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+        self.assertEqual(testValue, self.mem.ReadWord(TEST_DATA_ADDR))
+        # Return address
+        self.assertEqual(5 * 4, self.mem.ReadWord(TEST_DATA_ADDR + 4))
+
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
