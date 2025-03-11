@@ -651,6 +651,14 @@ def DefineCommands32():
         imm(12), imm(10,5), rs2(), rs1(), b("000"), imm(4,1), imm(11), b("1100011"))
     cmd("BNE",
         imm(12), imm(10,5), rs2(), rs1(), b("001"), imm(4,1), imm(11), b("1100011"))
+    cmd("BLT",
+        imm(12), imm(10,5), rs2(), rs1(), b("100"), imm(4,1), imm(11), b("1100011"))
+    cmd("BGE",
+        imm(12), imm(10,5), rs2(), rs1(), b("101"), imm(4,1), imm(11), b("1100011"))
+    cmd("BLTU",
+        imm(12), imm(10,5), rs2(), rs1(), b("110"), imm(4,1), imm(11), b("1100011"))
+    cmd("BGEU",
+        imm(12), imm(10,5), rs2(), rs1(), b("111"), imm(4,1), imm(11), b("1100011"))
     cmd("LUI",
         imm(31,12), rd(), b("0110111"))
     cmd("AUIPC",

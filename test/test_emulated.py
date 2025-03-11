@@ -6,7 +6,7 @@ from gateforge.compiler import CompileModule, CompileResult
 from gateforge.core import RenderOptions
 from riscv.instruction_set import Assemble as asm
 from testbench import TestbenchModule
-from utils import GetVerilatorParams, NullOutput, disableVerilatorTests, workspaceDir
+from utils import GetVerilatorParams, NullOutput, SignExtend, disableVerilatorTests, workspaceDir
 
 
 class Memory:
@@ -679,6 +679,78 @@ class TestNoCompression(TestBase):
         # Return address
         self.assertEqual(7 * 4, self.mem.ReadWord(TEST_DATA_ADDR + 4))
 
+
+    def _TestBranchingImpl(self, value1: int, value2: int, opName: str, op):
+        testValue = 0xdeadbeef
+        self.SetProgram([
+            *Li(TEST_DATA_ADDR, 10),
+            *Li(testValue, 11),
+            *Li(value1, 12),
+            *Li(value2, 13),
+            asm("B" + opName, imm=8, rs1=12, rs2=13),
+            asm("XORI", imm=-1, rs1=11, rd=11), # Zeroes mark
+            asm("SW", imm=0, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        mark = self.mem.ReadWord(TEST_DATA_ADDR)
+        try:
+            if op(value1, value2):
+                self.assertEqual(testValue, mark)
+            else:
+                self.assertEqual(~testValue & 0xffffffff, mark)
+        except:
+            print(f"Failed op: {value1} {opName} {value2}")
+            raise
+
+
+    def _TestBranching(self, value1: int, value2: int):
+        ops = [
+            ("EQ", lambda x, y: (x & 0xffffffff) == (y & 0xffffffff)),
+            ("NE", lambda x, y: (x & 0xffffffff) != (y & 0xffffffff)),
+            ("LT", lambda x, y: SignExtend(x) < SignExtend(y)),
+            ("GE", lambda x, y: SignExtend(x) >= SignExtend(y)),
+            ("LTU", lambda x, y: (x & 0xffffffff) < (y & 0xffffffff)),
+            ("GEU", lambda x, y: (x & 0xffffffff) >= (y & 0xffffffff))
+        ]
+
+        for opName, op in ops:
+            self._TestBranchingImpl(value1, value2, opName, op)
+
+
+    def test_branching(self):
+        values = [
+            (0, 0),
+            (1, 1),
+            (100, 0),
+            (100, 50),
+            (0x80000000, 0),
+            (0x80000000, 100),
+            (0x80000000, 0x80000000),
+            (0xffffffff, 0),
+            (0xffffffff, 100),
+            (0xffffffff, 0x80000000),
+            (0xffffffff, 0xffffffff)
+        ]
+
+        for x, y in values:
+            self._TestBranching(x, y)
+            if (x != y):
+                self._TestBranching(y, x)
+            if x != SignExtend(x) & 0xffffffff:
+                self._TestBranching(-x, y)
+                if (x != y):
+                    self._TestBranching(y, -x)
+            if y != SignExtend(y) & 0xffffffff:
+                self._TestBranching(x, -y)
+                if (x != y):
+                    self._TestBranching(-y, x)
+            if x != SignExtend(x) & 0xffffffff and y != SignExtend(y) & 0xffffffff:
+                self._TestBranching(-x, -y)
+                if (x != y):
+                    self._TestBranching(-y, -x)
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")

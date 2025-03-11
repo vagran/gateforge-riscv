@@ -5,7 +5,9 @@
         "Auipc",
         "bassign",
         "BEQZ",
+        "BGEU",
         "Blinky",
+        "BLTU",
         "BNEZ",
         "EBREAK",
         "endcase",
@@ -58,6 +60,7 @@
         "Verilog",
         "wireable",
         "xnor",
+        "XORI",
         "yosys"
     ],
     "env": {

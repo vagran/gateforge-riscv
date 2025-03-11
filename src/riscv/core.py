@@ -141,6 +141,13 @@ class InsnDecoder:
     isJalr: Wire
     isBranch: Wire
 
+    # Valid if `isBranch` is true
+    isBranchEq: Wire
+    isBranchLt: Wire
+    isBranchLtu: Wire
+    # Inverse of condition defined by flags above
+    isBranchInverse: Wire
+
     # Immediate value if any.
     immediate: Reg[32]
 
@@ -207,6 +214,11 @@ class InsnDecoder:
         self.isJal <<= self.isJump & self._input[3]
         self.isJalr <<= self.isJump & ~self._input[3]
         self.isBranch <<= self.isControlTransfer & (self._input[3:2] == const("2'b00"))
+
+        self.isBranchEq <<= ~self._input[14]
+        self.isBranchLt <<= self._input[14] & ~self._input[13]
+        self.isBranchLtu <<= self._input[14] & self._input[13]
+        self.isBranchInverse <<= self._input[12]
 
         with always_comb():
             with _if (isUType):
@@ -301,6 +313,11 @@ class RiscvCpu:
     # Sign bit for load transfer
     loadSign: Reg
 
+    # True if branch should be taken
+    branchTakenCond: Wire
+    # True if branch taken so the second stage is initiated
+    branchTaken: Reg
+
     # Aliases for register file interface
     rs1: Wire[32]
     rs2: Wire[32]
@@ -372,17 +389,19 @@ class RiscvCpu:
         aluInB = wire("aluInB", 32)
         aluIsSub = wire("aluIsSub")
 
-        #XXX branching
-        aluIsSub <<= self.insnDecoder.isAluOp & \
-            (self.insnDecoder.isAluSlt | self.insnDecoder.isAluSltu | self.insnDecoder.isAluSub)#XXX
+        aluIsSub <<= ((self.insnDecoder.isAluOp & (self.insnDecoder.isAluSlt |
+                                                   self.insnDecoder.isAluSltu |
+                                                   self.insnDecoder.isAluSub)) |
+            (self.insnDecoder.isBranch & ~self.branchTaken))
 
         #XXX use unknown bits for MSBs
         pc = const(0, 32 - self.pcAlignBits - self.pc.vectorSize) % self.pc % \
             const(0, self.pcAlignBits)
 
-        aluInA <<= cond(self.insnDecoder.isAuipc | self.insnDecoder.isJal | self.insnDecoder.isBranch,
+        aluInA <<= cond(self.insnDecoder.isAuipc | self.insnDecoder.isJal | self.branchTaken,
                         pc, self.rs1)
-        aluInB <<= cond(self.insnDecoder.isAluRegToReg, self.rs2, self.insnDecoder.immediate)
+        aluInB <<= cond(self.insnDecoder.isAluRegToReg | (self.insnDecoder.isBranch & ~self.branchTaken),
+                        self.rs2, self.insnDecoder.immediate)
 
         self.alu = Alu(inA=aluInA, inB=aluInB, isSub=aluIsSub)
 
@@ -393,7 +412,7 @@ class RiscvCpu:
                                       writeMask=self.memWriteMask)
 
         self.ctrlIface.trap <<= self.stateTrap
-        self.ctrlIface.ebreak <<= self.insnDecoder.isEbreak
+        self.ctrlIface.ebreak <<= self.insnFetched & self.insnDecoder.isEbreak
 
         if self.params.hasCompressedIsa:
             self.nextPc <<= cond(IsCompressedInsn(self.insn), self.pc + 1, self.pc + 2)
@@ -432,6 +451,11 @@ class RiscvCpu:
         self.regFileIface.external.writeData <<= self.rd
         self.regFileIface.external.writeEn <<= self.writeRd
 
+        self.branchTakenCond <<= (
+            (self.insnDecoder.isBranchEq & (self.alu.outZ ^ self.insnDecoder.isBranchInverse)) |
+            (self.insnDecoder.isBranchLt & (self.alu.outLt ^ self.insnDecoder.isBranchInverse)) |
+            (self.insnDecoder.isBranchLtu & (self.alu.outLtu ^ self.insnDecoder.isBranchInverse)))
+
         with always(self.ctrlIface.clk.posedge):
             with _if (self.ctrlIface.reset):
                 self._HandleReset()
@@ -453,6 +477,7 @@ class RiscvCpu:
         self.stateDataFetch <<= False
         self.stateWriteBack <<= False
         self.stateTrap <<= False
+        self.branchTaken <<= False
 
 
     def _HandleState(self):
@@ -472,11 +497,20 @@ class RiscvCpu:
         with _if (self.stateRegFetch):
             self._HandleRegFetch()
 
-        with _elseif (self.stateDataFetch):
+        with _if (self.stateDataFetch):
             self._HandleDataFetch()
 
-        with _elseif (self.stateWriteBack):
+        with _if (self.stateWriteBack):
             self._HandleWriteBack()
+
+        with _if (self.branchTaken):
+            # Second pass, ALU has jump address
+            self.pc <<= self.alu.outAddSub[self.pc.vectorSize + self.pcAlignBits - 1 : self.pcAlignBits]
+            self.stateWriteBack <<= True
+            # Reset instruction pre-fetching pipeline
+            self.insnFetched <<= False
+            if self.params.hasCompressedIsa:
+                self.unalignedInsnFetch <<= False
 
 
     # Initiate fetched instruction execution. `insn` and decoder output will be available on next
@@ -500,7 +534,6 @@ class RiscvCpu:
 
 
     def _FetchRegs(self):
-        #XXX finish control transfers
         with _if(~self.insnDecoder.isControlTransfer):
             self.pc <<= self.nextPc
 
@@ -516,6 +549,12 @@ class RiscvCpu:
                 const(0, self.pcAlignBits)
             self.pc <<= self.alu.outAddSub[self.pc.vectorSize + self.pcAlignBits - 1 : self.pcAlignBits]
             self.stateWriteBack <<= True
+
+        with _elseif (self.insnDecoder.isBranch):
+            self.branchTaken <<= self.branchTakenCond
+            with _if (~self.branchTakenCond):
+                self.pc <<= self.nextPc
+                self.stateWriteBack <<= True
 
         with _elseif (self.insnDecoder.isLui | self.insnDecoder.isAluOp | self.insnDecoder.isStore):
             self.stateWriteBack <<= True
@@ -563,10 +602,11 @@ class RiscvCpu:
 
     def _HandleWriteBack(self):
 
-        with _if (self.memIface.valid & self.memIface.ready):
+        with _if ((self.memIface.valid & self.memIface.ready) | self.branchTaken):
             self.memValid <<= False
             self.stateWriteBack <<= False
             self.memWriteMask <<= 0
+            self.branchTaken <<= False
             self._FetchInstruction()
 
         with _elseif (self.insnDecoder.isAuipc | self.insnDecoder.isLui | self.insnDecoder.isAluOp |

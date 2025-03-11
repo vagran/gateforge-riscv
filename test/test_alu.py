@@ -6,7 +6,7 @@ from gateforge.compiler import CompileModule
 from gateforge.core import RenderOptions
 from gateforge.dsl import wire
 from riscv.alu import Alu
-from test.utils import GetVerilatorParams, NullOutput, disableVerilatorTests
+from test.utils import GetVerilatorParams, NullOutput, SignExtend, disableVerilatorTests
 
 
 SIZE = 8
@@ -40,11 +40,6 @@ class Testbench:
     @staticmethod
     def AluModule():
         Testbench()()
-
-
-def signExtend(value, size):
-    signBit = 1 << (size - 1)
-    return (value & (signBit - 1)) - (value & signBit)
 
 
 class TestBase(unittest.TestCase):
@@ -97,8 +92,8 @@ class TestBase(unittest.TestCase):
         self.assertEqual(1 if inAu == inBu else 0, self.ports.outZ)
         self.assertEqual(1 if inAu < inBu else 0, self.ports.outLtu)
 
-        inAs = signExtend(inAu, SIZE)
-        inBs = signExtend(inBu, SIZE)
+        inAs = SignExtend(inAu, SIZE)
+        inBs = SignExtend(inBu, SIZE)
 
         self.assertEqual(1 if inAs < inBs else 0, self.ports.outLt)
 
