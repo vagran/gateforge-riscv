@@ -556,6 +556,71 @@ test "div: multi-limb division" {
     try expectEqualSlices(u32, &.{0xFFFFFFFF}, res.limbs);
 }
 
+test "div: multi-limb division with multi-limb result" {
+    // 0x22222222FFFFFFFE
+    const a = try BigInt.init(std.testing.allocator, &.{0xFFFFFFFE, 0x22222222}, .positive);
+    defer a.deinit();
+    const b = try BigInt.init(std.testing.allocator, &.{0x2}, .positive);
+    defer b.deinit();
+
+    const res = try BigInt.div(a, b);
+    defer res.deinit();
+    try expectEqual(Sign.positive, res.sign);
+    try expectEqualSlices(u32, &.{0x7FFFFFFF, 0x11111111}, res.limbs);
+}
+
+test "div: multi-limb division by one" {
+    // 0x22222222FFFFFFFE
+    const a = try BigInt.init(std.testing.allocator, &.{0xFFFFFFFE, 0x22222222}, .positive);
+    defer a.deinit();
+    const b = try BigInt.init(std.testing.allocator, &.{0x1}, .positive);
+    defer b.deinit();
+
+    const res = try BigInt.div(a, b);
+    defer res.deinit();
+    try expectEqual(Sign.positive, res.sign);
+    try expectEqualSlices(u32, &.{0xFFFFFFFE, 0x22222222}, res.limbs);
+}
+
+test "div: multi-limb division by same value" {
+    // 0x22222222FFFFFFFE
+    const a = try BigInt.init(std.testing.allocator, &.{0xFFFFFFFE, 0x22222222}, .positive);
+    defer a.deinit();
+    const b = try BigInt.init(std.testing.allocator, &.{0xFFFFFFFE, 0x22222222}, .positive);
+    defer b.deinit();
+
+    const res = try BigInt.div(a, b);
+    defer res.deinit();
+    try expectEqual(Sign.positive, res.sign);
+    try expectEqualSlices(u32, &.{0x1}, res.limbs);
+}
+
+test "div: multi-limb division by half" {
+    // 0x22222222FFFFFFFE
+    const a = try BigInt.init(std.testing.allocator, &.{0xFFFFFFFE, 0x22222222}, .positive);
+    defer a.deinit();
+    const b = try BigInt.init(std.testing.allocator, &.{0x7FFFFFFF, 0x11111111}, .positive);
+    defer b.deinit();
+
+    const res = try BigInt.div(a, b);
+    defer res.deinit();
+    try expectEqual(Sign.positive, res.sign);
+    try expectEqualSlices(u32, &.{0x2}, res.limbs);
+}
+
+test "div: multi-limb division - multi limb result" {
+    // 0x222222224444444400000000
+    const a = try BigInt.init(std.testing.allocator, &.{0x0, 0x44444444, 0x22222222}, .positive);
+    defer a.deinit();
+    const b = try BigInt.init(std.testing.allocator, &.{0x0, 0x2}, .positive);
+    defer b.deinit();
+
+    const res = try BigInt.div(a, b);
+    defer res.deinit();
+    try expectEqual(Sign.positive, res.sign);
+    try expectEqualSlices(u32, &.{0x22222222, 0x11111111}, res.limbs);
+}
+
 test "mod: basic modulus" {
     const a = try BigInt.init(std.testing.allocator, &.{15}, .positive);
     defer a.deinit();
@@ -621,4 +686,37 @@ test "div64by32: complex division" {
     const res = div64by32(0x00000000, 0xFFFFFFFF, 0x10000);
     try expect(res.q == 0x0000FFFF);
     try expect(res.r == 0xFFFF);
+}
+
+test "shl: basic shift" {
+    const a = try BigInt.init(std.testing.allocator, &.{0x1}, .positive);
+    defer a.deinit();
+
+    const res = try a.shl(4);
+    defer res.deinit();
+
+    try expectEqual(Sign.positive, res.sign);
+    try expectEqualSlices(u32, &.{0x10}, res.limbs);
+}
+
+test "shl: cross-limb shift" {
+    const a = try BigInt.init(std.testing.allocator, &.{0xFFFFFFFF}, .positive);
+    defer a.deinit();
+
+    const res = try a.shl(4);
+    defer res.deinit();
+
+    try expectEqual(Sign.positive, res.sign);
+    try expectEqualSlices(u32, &.{0xFFFFFFF0, 0xF}, res.limbs);
+}
+
+test "shl: multi-limb shift" {
+    const a = try BigInt.init(std.testing.allocator, &.{0x1, 0x1}, .positive);
+    defer a.deinit();
+
+    const res = try a.shl(32);
+    defer res.deinit();
+
+    try expectEqual(Sign.positive, res.sign);
+    try expectEqualSlices(u32, &.{0x0, 0x1, 0x1}, res.limbs);
 }

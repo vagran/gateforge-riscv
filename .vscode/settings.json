@@ -18,6 +18,7 @@
         "endprimitive",
         "endtable",
         "endtask",
+        "errdefer",
         "ftdi",
         "gateforge",
         "IDCODE",

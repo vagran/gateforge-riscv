@@ -276,18 +276,43 @@ pub const BigInt = struct {
     }
 
     fn divMultiLimb(dividend: BigInt, divisor: BigInt, result_sign: Sign) !BigInt {
-        // Initialize quotient with correct sign
-        var quotient = try BigInt.init(dividend.allocator, &.{0}, result_sign);
         var current = try dividend.copy();
         defer current.deinit();
 
-        // Use positive one for magnitude increments
-        const one = try BigInt.init(dividend.allocator, &.{1}, .positive);
-        defer one.deinit();
+        var quotient = try BigInt.init(current.allocator, &.{0}, result_sign);
+        errdefer quotient.deinit();
 
-        while (compareMagnitude(current.limbs, divisor.limbs) != .lt) {
-            current = try sub(current, divisor);
-            quotient = try add(quotient, one);
+        const divisor_bits = bitLength(divisor);
+
+        while (true) {
+            const current_bits = bitLength(current);
+            if (current_bits < divisor_bits) break;
+
+            // Calculate maximum possible shift
+            var shift = current_bits - divisor_bits;
+            var shifted_divisor = try divisor.shl(shift);
+            defer shifted_divisor.deinit();
+
+            // Adjust shift downward until divisor fits
+            while (shift >= 0 and compareMagnitude(shifted_divisor.limbs, current.limbs) == .gt) {
+                shift -= 1;
+                shifted_divisor = try divisor.shl(shift);
+            }
+            if (shift < 0) break;
+
+            // Subtract shifted divisor from current
+            const new_current = try current.sub(shifted_divisor);
+            current.deinit();
+            current = new_current;
+
+            // Add corresponding power of two to quotient
+            var shift_value = try BigInt.init(current.allocator, &.{1}, .positive);
+            defer shift_value.deinit();
+            const shifted_value = try shift_value.shl(shift);
+            defer shifted_value.deinit();
+            const new_quotient = try quotient.add(shifted_value);
+            quotient.deinit();
+            quotient = new_quotient;
         }
 
         return quotient;
@@ -308,6 +333,32 @@ pub const BigInt = struct {
 
     fn copy(self: BigInt) !BigInt {
         return BigInt.init(self.allocator, self.limbs, self.sign);
+    }
+
+    /// Calculate number of significant bits in a BigInt
+    fn bitLength(num: BigInt) u32 {
+        if (num.limbs.len == 0) return 0;
+        const top_limb = num.limbs[num.limbs.len - 1];
+        return @intCast((num.limbs.len - 1) * 32 + (32 - @clz(top_limb)));
+    }
+
+    pub fn shl(self: BigInt, shift: u32) !BigInt {
+        const limb_shift = shift >> 5;
+        const bit_shift: u6 = @truncate(shift & 0x1F);
+
+        var result = try self.allocator.alloc(u32, self.limbs.len + limb_shift + 1);
+        defer self.allocator.free(result);
+
+        @memset(result[0..limb_shift], 0);
+        var carry: u32 = 0;
+        for (self.limbs, 0..) |limb, i| {
+            const shifted = (@as(u64, limb) << bit_shift) | carry;
+            result[i + limb_shift] = @truncate(shifted);
+            carry = @truncate(shifted >> 32);
+        }
+        result[self.limbs.len + limb_shift] = carry;
+
+        return BigInt.init(self.allocator, result, self.sign);
     }
 };
 
