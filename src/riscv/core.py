@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from typing import Optional
 from gateforge.concepts import Bus, ConstructNets, Interface
 from gateforge.core import Expression, InputNet, Net, OutputNet, Reg, Wire
-from gateforge.dsl import _case, _else, _elseif, _if, _when, always, always_comb, concat, cond, const, \
-    namespace, reg, wire
+from gateforge.dsl import _case, _else, _elseif, _if, _when, always, always_comb, concat, cond, \
+    const, namespace, reg, wire
 
 from riscv.alu import Alu
 from riscv.instruction_set import SynthesizeDecompressor
@@ -707,7 +707,6 @@ class RiscvCpu:
             # Aligned fetch
             self.memAddress <<= self.pc[:1]
             self.memValid <<= True
-
 
 
     def _HandleInstructionFetch(self):
