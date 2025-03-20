@@ -62,6 +62,7 @@
         "Testbench",
         "uimm",
         "Unwired",
+        "usize",
         "verilator",
         "Verilog",
         "wireable",

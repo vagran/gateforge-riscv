@@ -5,3 +5,4 @@ __pycache__/
 .mypy_cache/
 tmp/
 test-data/
+zig-out/

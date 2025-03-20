@@ -288,27 +288,43 @@ pub const BigInt = struct {
             const current_bits = bitLength(current);
             if (current_bits < divisor_bits) break;
 
-            // Calculate maximum possible shift
-            var shift = current_bits - divisor_bits;
-            var shifted_divisor = try divisor.shl(shift);
+            // Calculate initial shift using precise bit length difference
+            const shift = current_bits - divisor_bits;
+            var last_valid_shift: i32 = -1;
+
+            // Binary search for valid shift
+            var low: i32 = 0;
+            var high: i32 = @intCast(shift);
+            while (low <= high) {
+                const mid = (low + high) >> 1;
+                const test_shift: u32 = @intCast(mid);
+                var shifted_divisor = try divisor.shl(test_shift);
+                defer shifted_divisor.deinit();
+
+                switch (compareMagnitude(shifted_divisor.limbs, current.limbs)) {
+                    .gt => high = mid - 1,
+                    .lt, .eq => {
+                        last_valid_shift = mid;
+                        low = mid + 1;
+                    },
+                }
+            }
+
+            if (last_valid_shift == -1) break;
+            const final_shift = @as(u32, @intCast(last_valid_shift));
+
+            // Perform subtraction with exact shift
+            var shifted_divisor = try divisor.shl(final_shift);
             defer shifted_divisor.deinit();
 
-            // Adjust shift downward until divisor fits
-            while (shift >= 0 and compareMagnitude(shifted_divisor.limbs, current.limbs) == .gt) {
-                shift -= 1;
-                shifted_divisor = try divisor.shl(shift);
-            }
-            if (shift < 0) break;
-
-            // Subtract shifted divisor from current
             const new_current = try current.sub(shifted_divisor);
             current.deinit();
             current = new_current;
 
-            // Add corresponding power of two to quotient
+            // Update quotient
             var shift_value = try BigInt.init(current.allocator, &.{1}, .positive);
             defer shift_value.deinit();
-            const shifted_value = try shift_value.shl(shift);
+            const shifted_value = try shift_value.shl(final_shift);
             defer shifted_value.deinit();
             const new_quotient = try quotient.add(shifted_value);
             quotient.deinit();
@@ -331,7 +347,7 @@ pub const BigInt = struct {
         return self.limbs.len == 1 and self.limbs[0] == 0;
     }
 
-    fn copy(self: BigInt) !BigInt {
+    pub fn copy(self: BigInt) !BigInt {
         return BigInt.init(self.allocator, self.limbs, self.sign);
     }
 

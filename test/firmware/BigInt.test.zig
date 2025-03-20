@@ -621,6 +621,19 @@ test "div: multi-limb division - multi limb result" {
     try expectEqualSlices(u32, &.{0x22222222, 0x11111111}, res.limbs);
 }
 
+test "div: arbitrary numbers" {
+    // 0xb_d7cdf4d2 / 0x3_3385d46f
+    const a = try BigInt.init(std.testing.allocator, &.{0xf6f800d0, 0x7fff}, .positive);
+    defer a.deinit();
+    const b = try BigInt.init(std.testing.allocator, &.{0x3385d46f, 0x3}, .positive);
+    defer b.deinit();
+
+    const res = try a.div(b);
+    defer res.deinit();
+    try expectEqual(Sign.positive, res.sign);
+    try expectEqualSlices(u32, &.{0x27fb}, res.limbs);
+}
+
 test "mod: basic modulus" {
     const a = try BigInt.init(std.testing.allocator, &.{15}, .positive);
     defer a.deinit();
