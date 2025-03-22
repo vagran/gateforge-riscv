@@ -207,3 +207,14 @@ test "spigot" {
         try expectEqual(expected[i], buffer[i]);
     }
 }
+
+pub fn main() !void {
+    var buffer: [1000]u8 = undefined;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+	const allocator = gpa.allocator();
+    try spigot_pi(&buffer, allocator);
+    for (buffer) |digit| {
+        std.debug.print("{d}", .{digit});
+    }
+    std.debug.print("\n", .{});
+}

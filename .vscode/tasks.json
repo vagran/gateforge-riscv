@@ -49,7 +49,7 @@
         {
             "label": "Run specific unit test",
             "command": "${workspaceFolder}/.venv/bin/python",
-            "args": ["-m", "unittest", "test.test_emulated.TestNoCompression.test_branching"],
+            "args": ["-m", "unittest", "test.test_emulated.TestWithFirmware.test_simple"],
             "options": {
                 "cwd": "${workspaceFolder}",
                 "env": {
@@ -68,6 +68,14 @@
             "options": {
                 "cwd": "${workspaceFolder}/test-data"
             }
-        }
+        },
+        {
+            "label": "Compile firmware (simple)",
+            "command": "${config:env.zig}",
+            "args": ["build", "-Dname=simple"],
+            "options": {
+                "cwd": "${workspaceFolder}/test/firmware"
+            }
+        },
     ]
 }

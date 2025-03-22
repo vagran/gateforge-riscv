@@ -9,9 +9,12 @@
         "Blinky",
         "BLTU",
         "BNEZ",
+        "callconv",
         "comptime",
         "deinit",
         "EBREAK",
+        "ebss",
+        "edata",
         "endcase",
         "endfunction",
         "endmodule",
@@ -35,6 +38,7 @@
         "JTDI",
         "JTDO",
         "JUPDATE",
+        "linksection",
         "localparam",
         "LVCMOS",
         "LWSP",
@@ -43,6 +47,7 @@
         "nand",
         "negedge",
         "newtap",
+        "noreturn",
         "OBJDUMP",
         "OPENDRAIN",
         "posedge",
@@ -57,6 +62,7 @@
         "Sltu",
         "SRAI",
         "SRLI",
+        "sstack",
         "SWSP",
         "Synthesizable",
         "Testbench",
@@ -72,7 +78,8 @@
     ],
     "env": {
         "gfDir": "/home/artyom/projects/fpga/source_gateforge/src",
-        "ossCadSuiteDir": "/opt/oss-cad-suite"
+        "ossCadSuiteDir": "/opt/oss-cad-suite",
+        "zig": "/home/artyom/.config/Code/User/globalStorage/ziglang.vscode-zig/zig/linux-x86_64-0.14.0/zig"
     },
     "python.analysis.include": [
         "/home/artyom/projects/fpga/gateforge_riscv/src",

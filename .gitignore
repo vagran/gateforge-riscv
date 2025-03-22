@@ -6,3 +6,4 @@ __pycache__/
 tmp/
 test-data/
 zig-out/
+.zig-cache/

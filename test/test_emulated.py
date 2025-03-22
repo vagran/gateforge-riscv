@@ -816,3 +816,22 @@ class TestCompressed(TestBase):
         self.WaitEbreak()
 
         self.assertEqual(testValue + 2, self.mem.ReadWord(TEST_DATA_ADDR + offset))
+
+
+@unittest.skipIf(disableVerilatorTests, "Verilator")
+class TestWithFirmware(TestBase):
+
+    def test_simple(self):
+        baseDir = Path(__file__).parent
+        with open(baseDir / "firmware" / "zig-out" / "bin" / "firmware_simple.bin", mode="rb") as f:
+            fw = f.read()
+        self.mem.WriteBytes(0, fw)
+
+        self.Reset()
+
+        self.WaitEbreak()
+
+        testValue = 0xdeadbeef
+        testAddr = 0x800
+
+        self.assertEqual(testValue, self.mem.ReadWord(testAddr))
