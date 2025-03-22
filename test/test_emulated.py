@@ -1,3 +1,4 @@
+from pathlib import Path
 import struct
 from typing import Sequence
 import unittest
@@ -751,6 +752,26 @@ class TestNoCompression(TestBase):
                 self._TestBranching(-x, -y)
                 if (x != y):
                     self._TestBranching(-y, -x)
+
+
+    def test_auipc_after_branching(self):
+        testValue = 0xdeadbeef
+        self.SetProgram([
+            *Li(TEST_DATA_ADDR, 10), # 0
+            *Li(testValue, 11), # 2
+            asm("XOR", rs1=12, rs2=12, rd=12), # 4
+            asm("BEQ", imm=4 * 4, rs1=12, rs2=0), # 5
+            asm("XOR", rs1=11, rs2=11, rd=11), # 6
+            asm("XOR", rs1=11, rs2=11, rd=11), # 7
+            asm("XOR", rs1=11, rs2=11, rd=11), # 8
+            asm("AUIPC", imm=0x2000, rd=13), # 9
+            asm("ADD", rs1=11, rs2=13, rd=11),
+            asm("SW", imm=0, rs1=10, rs2=11),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+        self.assertEqual(testValue + 9 * 4 + 0x2000, self.mem.ReadWord(TEST_DATA_ADDR))
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")

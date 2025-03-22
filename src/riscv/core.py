@@ -482,7 +482,7 @@ class RiscvCpu:
 
     def _HandleState(self):
 
-        with _if(self.insnFetched):
+        with _if(self.insnFetched | self.branchTaken):
             self._HandleInstruction()
 
         with _elseif(~self.memValid):
@@ -503,7 +503,7 @@ class RiscvCpu:
         with _if (self.stateWriteBack):
             self._HandleWriteBack()
 
-        with _if (self.branchTaken):
+        with _elseif (self.branchTaken):
             # Second pass, ALU has jump address
             self.pc <<= self.alu.outAddSub[self.pc.vectorSize + self.pcAlignBits - 1 : self.pcAlignBits]
             self.stateWriteBack <<= True
