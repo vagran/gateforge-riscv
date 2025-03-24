@@ -53,6 +53,10 @@ class Memory:
         return int(self.buf[address])
 
 
+    def ReadBytes(self, address, size) -> bytes:
+        return self.buf[address:address + size]
+
+
     def WriteWord(self, address, value):
         self.buf[address: address + 4] = struct.pack("<I", value)
 
@@ -520,7 +524,7 @@ class TestNoCompression(TestBase):
         elif op == "SRL":
             result = (v1 >> v2) & ((1 << (32 - v2)) - 1)
         else:
-            result = v1 >> v2
+            result = (SignExtend(v1) >> v2) & 0xffffffff
 
         self.assertEqual(result, self.mem.ReadWord(TEST_DATA_ADDR))
 
@@ -774,6 +778,72 @@ class TestNoCompression(TestBase):
         self.assertEqual(testValue + 9 * 4 + 0x2000, self.mem.ReadWord(TEST_DATA_ADDR))
 
 
+    def TestSoftMul(self, x, y):
+
+        def mul(a0, a1):
+            a0 = a0 & 0xffff_ffff
+            a1 = a1 & 0xffff_ffff
+            a2 = 0
+            if a0 == 0:
+                return a2
+            while True:
+                a3 = (a0 << 31) & 0xffff_ffff
+                # Arithmetic shift right by 31 bits, effectively sets all bits to sign bit
+                a3 = 0 if a3 == 0 else 0xffff_ffff
+                a3 = a3 & a1
+                a2 = (a2 + a3) & 0xffff_ffff
+                a0 = a0 >> 1
+                a1 = a1 << 1
+                if a0 == 0:
+                    break
+            return a2
+
+        a0 = 10
+        a1 = 11
+        a2 = 12
+        a3 = 13
+
+        self.SetProgram([
+            *Li(x, a0), # 0
+            *Li(y, a1), # 2
+            *Li(0, a2), # 4
+            asm("BEQ", rs1=0, rs2=a0, imm=(13-5)*4), # 5
+            asm("SLLI", rd=a3, rs1=a0, imm=31), # 6
+            asm("SRAI", rd=a3, rs1=a3, imm=31), # 7
+            asm("AND", rd=a3, rs1=a3, rs2=a1), # 8
+            asm("ADD", rd=a2, rs1=a3, rs2=a2), # 9
+            asm("SRLI", rd=a0, rs1=a0, imm=1), # 10
+            asm("SLLI", rd=a1, rs1=a1, imm=1), # 11
+            asm("BNE", rs1=0, rs2=a0, imm=(6-12)*4), # 12
+            *Li(TEST_DATA_ADDR, 14), # 13
+            asm("SW", imm=0, rs1=14, rs2=a2),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        expected = (x * y) & 0xFFFFFFFF
+        self.assertEqual(expected, mul(x, y))
+        self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_soft_mul(self):
+        self.TestSoftMul(0xdeadbeef, 0xcc9e2d51)
+
+    def test_soft_mul_0(self):
+        self.TestSoftMul(0xdeadbeef, 0)
+
+    def test_soft_mul_0_1(self):
+        self.TestSoftMul(0, 0xdeadbeef)
+
+    def test_soft_mul_1(self):
+        self.TestSoftMul(1, 0xdeadbeef)
+
+    def test_soft_mul_2(self):
+        self.TestSoftMul(2, 0xdeadbeef)
+
+
+
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestUncompressedOnCompressedIsa(TestNoCompression):
     hasCompressedIsa = True
@@ -818,20 +888,83 @@ class TestCompressed(TestBase):
         self.assertEqual(testValue + 2, self.mem.ReadWord(TEST_DATA_ADDR + offset))
 
 
+def hash(x1, x2, seed):
+    # h = seed
+    c1 = 0xcc9e2d51
+    # c2 = 0x1b873593
+
+    # for x in [x1, x2]:
+    #     k = x
+
+    #     k *= c1
+        #k = (k << 15) | (k >> (32 - 15))  # Rotate left 15 bits
+        #k *= c2
+
+        # h ^= k
+        #h = (h << 13) | (h >> (32 - 13))  # Rotate left 13 bits
+        #h = h * 5 + 0xe6546b64
+
+    # Return as unsigned 32-bit integer
+    # return h & 0xFFFFFFFF
+    return (x1 * c1) & 0xFFFFFFFF
+
+
+@unittest.skip("tmp")
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestWithFirmware(TestBase):
+    baseDir = Path(__file__).parent
 
     def test_simple(self):
-        baseDir = Path(__file__).parent
-        with open(baseDir / "firmware" / "zig-out" / "bin" / "firmware_simple.bin", mode="rb") as f:
+        with open(self.baseDir / "firmware" / "zig-out" / "bin" / "firmware_simple.bin", mode="rb") as f:
             fw = f.read()
         self.mem.WriteBytes(0, fw)
+
+        testAddr = 0x800
+        inValue = 0x12345678deadbeef
+        testValue = hash(inValue & 0xFFFFFFFF, inValue >> 32, 0xc001babe)
+        self.mem.WriteBytes(testAddr + 8, struct.pack("<Q", inValue))
 
         self.Reset()
 
         self.WaitEbreak()
 
-        testValue = 0xdeadbeef
+        print(self.mem.ReadBytes(testAddr, 32))
+        self.assertEqual(0, self.mem.ReadWord(testAddr))
+        self.assertEqual(testValue, self.mem.ReadWord(testAddr + 4))
+        self.assertEqual(b"1234567890", self.mem.ReadBytes(testAddr + 16, 10))
+
+
+
+    # def test_print(self):
+    #     with open(self.baseDir / "firmware" / "zig-out" / "bin" / "firmware_print.bin", mode="rb") as f:
+    #         fw = f.read()
+    #     self.mem.WriteBytes(0, fw)
+
+    #     testValue = 0x12345678deadbeef
+    #     testAddr = 0x800
+    #     self.mem.WriteBytes(testAddr, struct.pack("<Q", testValue))
+
+    #     self.Reset()
+
+    #     self.WaitEbreak()
+
+    #     # self.assertEqual(0, self.mem.ReadWord(testAddr + 8))
+    #     addr = self.mem.ReadWord(testAddr + 8)
+    #     print(addr)
+    #     print(self.mem.ReadBytes(addr, 128))
+    #     # print(self.mem.ReadBytes(testAddr, 128))
+
+
+    def test_spigot(self):
+        with open(self.baseDir / "firmware" / "zig-out" / "bin" / "firmware_spigot.bin", mode="rb") as f:
+            fw = f.read()
+        self.mem.WriteBytes(0, fw)
+
         testAddr = 0x800
 
-        self.assertEqual(testValue, self.mem.ReadWord(testAddr))
+        self.Reset()
+
+        self.WaitEbreak()
+
+        self.assertEqual(0, self.mem.ReadWord(testAddr))
+        print(self.mem.ReadBytes(testAddr, 32))
