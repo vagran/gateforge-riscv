@@ -768,8 +768,8 @@ class TestNoCompression(TestBase):
             asm("XOR", rs1=11, rs2=11, rd=11), # 6
             asm("XOR", rs1=11, rs2=11, rd=11), # 7
             asm("XOR", rs1=11, rs2=11, rd=11), # 8
-            asm("AUIPC", imm=0x2000, rd=13), # 9
-            asm("ADD", rs1=11, rs2=13, rd=11),
+            asm("AUIPC", imm=0x2000, rd=13), # 9 0x2024
+            asm("ADD", rs1=11, rs2=13, rd=11), # a
             asm("SW", imm=0, rs1=10, rs2=11),
             asm("EBREAK")
         ])
@@ -842,6 +842,111 @@ class TestNoCompression(TestBase):
     def test_soft_mul_2(self):
         self.TestSoftMul(2, 0xdeadbeef)
 
+    def test_soft_mul_zero_lsb(self):
+        self.TestSoftMul(0xdeadbeef, 0x16a88000)
+
+
+    def test_procedure_call_mul(self):
+        ra = 1
+        a0 = 10
+        a1 = 11
+        a2 = 12
+        a3 = 13
+        s0 = 8
+        s1 = 9
+
+        x = 0xdeadbeef
+        y = 0xcc9e2d51
+
+        self.SetProgram([
+            *Li(x, a0), # 0
+            *Li(y, a1), # 2
+            asm("ADDI", imm=0, rs1=a0, rd=s0), # 4
+
+            asm("AUIPC", rd=ra, imm=0), # 5
+            asm("JALR", rs1=ra, rd=ra, imm=(18-5)*4), # 6 0x4b0b6c9f
+
+            asm("ADDI", imm=0, rs1=a0, rd=s1), # 7
+            asm("LUI", rd=a1, imm=(y << 15) & 0xffff_ffff), # 8 0x16a88000
+            asm("ADDI", imm=0, rs1=s0, rd=a0), # 9
+            asm("AUIPC", rd=ra, imm=0), # 10
+            asm("JALR", rs1=ra, rd=ra, imm=(18-10)*4), # 11 0xb64f8000
+            asm("SRLI", rs1=s1, rd=s1, imm=17), # 12 0x2585
+            asm("OR", rs1=a0, rs2=s1, rd=a0), # 13 0xb64fa585
+
+            *Li(TEST_DATA_ADDR, 14), # 14
+            asm("SW", imm=0, rs1=14, rs2=a0), # 16
+            asm("EBREAK"), # 17
+
+            # 18 - mul subroutine
+            asm("ADDI", rs1=0, imm=0, rd=a2), # 12
+            asm("BEQ", rs1=0, rs2=a0, imm=(13-5)*4), # 13
+            asm("SLLI", rd=a3, rs1=a0, imm=31), # 14
+            asm("SRAI", rd=a3, rs1=a3, imm=31), # 15
+            asm("AND", rd=a3, rs1=a3, rs2=a1), # 16
+            asm("ADD", rd=a2, rs1=a3, rs2=a2), # 17
+            asm("SRLI", rd=a0, rs1=a0, imm=1), # 18
+            asm("SLLI", rd=a1, rs1=a1, imm=1), # 19
+            asm("BNE", rs1=0, rs2=a0, imm=(6-12)*4), # 1a
+            asm("ADDI", imm=0, rs1=a2, rd=a0), # 1b
+            asm("JALR", rs1=ra, rd=0, imm=0) # 1c
+        ])
+
+        self.WaitEbreak()
+
+        expected = x * y # 0x4b0b6c9f
+        expected &= 0xffff_ffff
+        expected = (expected << 15) | (expected >> (32 - 15))  # Rotate left 15 bits
+        expected &= 0xffff_ffff
+        self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_procedure_call_simple(self):
+        ra = 1
+        a0 = 10
+        a1 = 11
+        s0 = 8
+        s1 = 9
+
+        x = 0xdeadbeef
+        y = 0xcc9e2d51
+
+        self.SetProgram([
+            *Li(x, a0), # 0
+            *Li(y, a1), # 2
+            asm("ADDI", imm=0, rs1=a0, rd=s0), # 4
+
+            asm("AUIPC", rd=ra, imm=0), # 5
+            asm("JALR", rs1=ra, rd=ra, imm=(18-5)*4), # 6
+
+            asm("ADDI", imm=0, rs1=a0, rd=s1), # 7
+
+            asm("LUI", rd=a1, imm=(y << 12) & 0xffff_ffff), # 8
+
+            asm("SRLI", imm=13, rs1=s0, rd=a0), # 9
+
+            asm("AUIPC", rd=ra, imm=0), # 10
+            asm("JALR", rs1=ra, rd=ra, imm=(18-10)*4), # 11
+
+            asm("SRLI", rs1=s1, rd=s1, imm=17), # 12
+            asm("XOR", rs1=a0, rs2=s1, rd=a0), # 13
+
+            *Li(TEST_DATA_ADDR, 14), # 14
+            asm("SW", imm=0, rs1=14, rs2=a0), # 16
+            asm("EBREAK"), # 17
+
+            # 18 - subroutine
+            asm("XOR", rs1=a0, rs2=a1, rd=a0),
+            asm("JALR", rs1=ra, rd=0, imm=0)
+        ])
+
+        self.WaitEbreak()
+
+        a = x ^ y # 0x123393be
+        b = (x >> 13) ^ (y << 12) # 0x6f56d ^ 0xe2d51000 = 0xe2d3e56d
+        b &= 0xffff_ffff
+        expected = (a >> 17) ^ b # 0x919 ^ b = 0xe2d3ec74
+        self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
@@ -889,27 +994,30 @@ class TestCompressed(TestBase):
 
 
 def hash(x1, x2, seed):
-    # h = seed
+    h = seed
     c1 = 0xcc9e2d51
-    # c2 = 0x1b873593
+    c2 = 0x1b873593
 
-    # for x in [x1, x2]:
-    #     k = x
+    for x in [x1, x2]:
+        k = x
 
-    #     k *= c1
-        #k = (k << 15) | (k >> (32 - 15))  # Rotate left 15 bits
-        #k *= c2
+        k *= c1
+        k &= 0xffff_ffff
+        k = (k << 15) | (k >> (32 - 15))  # Rotate left 15 bits
+        k &= 0xffff_ffff
+        k *= c2
+        k &= 0xffff_ffff
 
-        # h ^= k
-        #h = (h << 13) | (h >> (32 - 13))  # Rotate left 13 bits
-        #h = h * 5 + 0xe6546b64
+        h ^= k
+        h = (h << 13) | (h >> (32 - 13))  # Rotate left 13 bits
+        h &= 0xffff_ffff
+        h = h * 5 + 0xe6546b64
+        h &= 0xffff_ffff
 
     # Return as unsigned 32-bit integer
-    # return h & 0xFFFFFFFF
-    return (x1 * c1) & 0xFFFFFFFF
+    return h
 
 
-@unittest.skip("tmp")
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestWithFirmware(TestBase):
     baseDir = Path(__file__).parent

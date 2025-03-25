@@ -1,4 +1,4 @@
-__stack_size = 4K;
+__stack_size = 64K;
 ENTRY(_resetHandler)
 
 EXTERN(_resetHandler)
@@ -7,7 +7,7 @@ SECTIONS
 {
 	. = 0;
 
-	.reset.text : ALIGN(16) {
+	.text.reset : ALIGN(16) {
 		*(.reset)
 	}
 

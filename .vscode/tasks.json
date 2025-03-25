@@ -77,5 +77,13 @@
                 "cwd": "${workspaceFolder}/test/firmware"
             }
         },
+        {
+            "label": "Compile firmware (spigot)",
+            "command": "${config:env.zig}",
+            "args": ["build", "-Dname=spigot"],
+            "options": {
+                "cwd": "${workspaceFolder}/test/firmware"
+            }
+        },
     ]
 }
