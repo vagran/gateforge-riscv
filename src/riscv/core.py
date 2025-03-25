@@ -602,10 +602,12 @@ class RiscvCpu:
 
     def _HandleWriteBack(self):
 
-        with _if ((self.memIface.valid & self.memIface.ready) | self.branchTaken):
+        with _if ((self.memIface.valid & self.memIface.ready) | self.insnDecoder.isBranch):
             self.memValid <<= False
             self.stateWriteBack <<= False
             self.memWriteMask <<= 0
+            # Should be reset on write-back stage because insnFetched is reset, so branchTaken is
+            # used in _HandleState to check if instruction is still executed.
             self.branchTaken <<= False
             self._FetchInstruction()
 
