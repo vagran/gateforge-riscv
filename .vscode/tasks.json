@@ -49,7 +49,7 @@
         {
             "label": "Run specific unit test",
             "command": "${workspaceFolder}/.venv/bin/python",
-            "args": ["-m", "unittest", "test.test_emulated.TestWithFirmware.test_simple"],
+            "args": ["-m", "unittest", "test.test_emulated.TestWithFirmware.test_print"],
             "options": {
                 "cwd": "${workspaceFolder}",
                 "env": {
@@ -73,6 +73,14 @@
             "label": "Compile firmware (simple)",
             "command": "${config:env.zig}",
             "args": ["build", "-Dname=simple"],
+            "options": {
+                "cwd": "${workspaceFolder}/test/firmware"
+            }
+        },
+        {
+            "label": "Compile firmware (print)",
+            "command": "${config:env.zig}",
+            "args": ["build", "-Dname=print"],
             "options": {
                 "cwd": "${workspaceFolder}/test/firmware"
             }

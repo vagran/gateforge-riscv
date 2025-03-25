@@ -40,7 +40,6 @@ SECTIONS
 
 	.stack : ALIGN( 16 ) {
 		_estack = .;
+		_sstack = _estack + __stack_size;
 	}
-
-    _sstack = _estack + __stack_size;
 }

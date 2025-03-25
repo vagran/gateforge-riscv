@@ -1042,25 +1042,22 @@ class TestWithFirmware(TestBase):
         self.assertEqual(b"1234567890", self.mem.ReadBytes(testAddr + 16, 10))
 
 
+    def test_print(self):
+        with open(self.baseDir / "firmware" / "zig-out" / "bin" / "firmware_print.bin", mode="rb") as f:
+            fw = f.read()
+        self.mem.WriteBytes(0, fw)
 
-    # def test_print(self):
-    #     with open(self.baseDir / "firmware" / "zig-out" / "bin" / "firmware_print.bin", mode="rb") as f:
-    #         fw = f.read()
-    #     self.mem.WriteBytes(0, fw)
+        testValue = 0x12345678deadbeef
+        testAddr = 0x800
+        self.mem.WriteBytes(testAddr + 8, struct.pack("<Q", testValue))
 
-    #     testValue = 0x12345678deadbeef
-    #     testAddr = 0x800
-    #     self.mem.WriteBytes(testAddr, struct.pack("<Q", testValue))
+        self.Reset()
 
-    #     self.Reset()
+        self.WaitEbreak()
 
-    #     self.WaitEbreak()
-
-    #     # self.assertEqual(0, self.mem.ReadWord(testAddr + 8))
-    #     addr = self.mem.ReadWord(testAddr + 8)
-    #     print(addr)
-    #     print(self.mem.ReadBytes(addr, 128))
-    #     # print(self.mem.ReadBytes(testAddr, 128))
+        self.assertEqual(0, self.mem.ReadWord(testAddr))
+        expected = "Test value: 12345678deadbeef".encode()
+        self.assertEqual(expected, self.mem.ReadBytes(testAddr + 16, len(expected)))
 
 
     def test_spigot(self):
