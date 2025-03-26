@@ -22,6 +22,7 @@
         "endtable",
         "endtask",
         "errdefer",
+        "freelist",
         "ftdi",
         "gateforge",
         "IDCODE",
