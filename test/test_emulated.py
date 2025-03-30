@@ -7,7 +7,8 @@ from gateforge.compiler import CompileModule, CompileResult
 from gateforge.core import RenderOptions
 from riscv.instruction_set import Assemble as asm
 from testbench import TestbenchModule
-from utils import GetVerilatorParams, NullOutput, SignExtend, disableVerilatorTests, workspaceDir
+from utils import GetVerilatorParams, NullOutput, SignExtend, disableVerilatorTests, \
+    disableFirmwareTests, workspaceDir
 
 
 class Memory:
@@ -1054,7 +1055,9 @@ def ParsePiDigits(n):
                 n -= 1
     return result
 
+
 @unittest.skipIf(disableVerilatorTests, "Verilator")
+@unittest.skipIf(disableFirmwareTests, "Firmware")
 class TestWithFirmware(TestBase):
     baseDir = Path(__file__).parent
 

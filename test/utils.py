@@ -6,6 +6,7 @@ from gateforge.verilator import VerilatorParams
 
 
 disableVerilatorTests = int(os.getenv("DISABLE_VERILATOR_TESTS", "0"))
+disableFirmwareTests = int(os.getenv("DISABLE_FIRMWARE_TESTS", "0"))
 
 workspaceDir = Path(__file__).parent / "workspace"
 

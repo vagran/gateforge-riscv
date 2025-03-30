@@ -50,6 +50,7 @@ class ControlInterface(Interface["ControlInterface"]):
     reset: InputNet[Wire]
     clk: InputNet[Wire]
     trap: OutputNet[Wire]
+    # EBREAK instruction encountered
     ebreak: OutputNet[Wire]
 
 
