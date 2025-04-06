@@ -11,7 +11,8 @@ class Testbench:
         params = RiscvParams(hasEbreak=True, hasCompressedIsa=hasCompressedIsa)
         self.ctrlIface = ControlInterface()
         self.memIface = MemoryInterface(20)
-        self.cpu = RiscvCpu(params=params, ctrlIface=self.ctrlIface, memIface=self.memIface)
+        self.cpu = RiscvCpu(params=params, ctrlIface=self.ctrlIface, memIface=self.memIface,
+                            regInit=lambda _: 0xaaaaaaaa)
 
 
     def __call__(self):

@@ -1,10 +1,10 @@
 # mypy: disable-error-code="type-arg, valid-type"
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 from gateforge.concepts import Bus, ConstructNets, Interface
 from gateforge.core import Expression, InputNet, Net, OutputNet, Reg, Wire
 from gateforge.dsl import _case, _else, _elseif, _if, _when, always, always_comb, concat, cond, \
-    const, namespace, reg, wire
+    const, initial, namespace, reg, wire
 
 from riscv.alu import Alu
 from riscv.instruction_set import SynthesizeDecompressor
@@ -75,7 +75,8 @@ class RegFileInterface(Interface["RegFileInterface"]):
     readDataB: OutputNet[Wire, 32]
 
 
-def CreateDefaultRegFile(regIdxBits: int) -> RegFileInterface:
+def CreateDefaultRegFile(regIdxBits: int, regInit: Optional[Callable[[int], int]] = None) \
+    -> RegFileInterface:
     """Just use array of words. Hopefully is inferred to block RAM primitives.
 
     :param regIdxBits: Number of bits in address.
@@ -91,12 +92,17 @@ def CreateDefaultRegFile(regIdxBits: int) -> RegFileInterface:
         # valid in Verilog and results to zero on reading and NOP on writing.
         regs = reg("regs", 32).array((1 << regIdxBits) - 1)
 
-        with always(iface.clk.posedge):
-            with _if (iface.writeEn):
-                regs[~iface.writeAddr] <<= iface.writeData
+    with always(iface.clk.posedge):
+        with _if (iface.writeEn):
+            regs[~iface.writeAddr] <<= iface.writeData
 
-        iface.readDataA <<= regs[~iface.readAddrA]
-        iface.readDataB <<= regs[~iface.readAddrB]
+    iface.readDataA <<= regs[~iface.readAddrA]
+    iface.readDataB <<= regs[~iface.readAddrB]
+
+    if regInit is not None:
+        with initial():
+            for idx in range(1, 1 << regIdxBits):
+                regs[~idx & ((1 << regIdxBits) - 1)] <<= regInit(idx)
 
     return iface
 
@@ -331,13 +337,17 @@ class RiscvCpu:
 
 
     def __init__(self, *, params: RiscvParams, ctrlIface: ControlInterface,
-                 memIface: MemoryInterface, regFileIface: Optional[RegFileInterface] = None):
+                 memIface: MemoryInterface, regFileIface: Optional[RegFileInterface] = None,
+                 regInit: Optional[Callable[[int], int]] = None):
         """_summary_
 
         :param params:
         :param memIface: _description_
         :param debugBus: External debug bus. If not provided and `params.debug` is True, default one
             is created with all nets exposed to module ports.
+        :param regInit: Optional initial values provider for registers. Accepts register index and
+            returns its initial value. Only for default register file implementation. May be useful
+            for tests.
         """
         self.params = params
 
@@ -347,7 +357,7 @@ class RiscvCpu:
         self.ctrlIface = ctrlIface
         self.memIface = memIface
         self.regFileIface = regFileIface if regFileIface is not None else \
-            CreateDefaultRegFile(self.regIdxBits)
+            CreateDefaultRegFile(self.regIdxBits, regInit)
 
         with namespace("RiscvCpu"):
             self._Setup()
