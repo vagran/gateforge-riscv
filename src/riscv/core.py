@@ -377,7 +377,7 @@ class RiscvCpu:
 
             decompressedInsn = reg("decompressedInsn", 30)
             with always_comb():
-                SynthesizeDecompressor(self.insn[15:0], decompressedInsn)
+                SynthesizeDecompressor(self.insn[15:0], decompressedInsn, self.params.hasEbreak)
 
             # Either decompressed or just fetched.
             normalizedInsn = cond(self.insn[1:0] == 0b11, self.insn[31:2], decompressedInsn)
@@ -529,19 +529,22 @@ class RiscvCpu:
 
 
     def _HandleRegFetch(self):
-        # May be not reset if short path taken - compressed instruction already fetched.
-        self.writeRd <<= False
+        # Register write-back may still be not finished if short path taken (compressed instruction
+        # pre-fetched), so need one more cycle.
+        with _if(self.writeRd):
+            self.writeRd <<= False
 
-        if self.params.hasEbreak:
-            with _if (self.insnDecoder.isEbreak):
-                #XXX debug support
-                self.stateTrap <<= True
+        with _else():
+            if self.params.hasEbreak:
+                with _if (self.insnDecoder.isEbreak):
+                    #XXX debug support
+                    self.stateTrap <<= True
 
-            with _else ():
+                with _else ():
+                    self._FetchRegs()
+
+            else:
                 self._FetchRegs()
-
-        else:
-            self._FetchRegs()
 
 
     def _FetchRegs(self):

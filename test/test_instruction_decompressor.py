@@ -111,7 +111,7 @@ def DecompressorTestbench():
     cmd32 = wire("cmd32", 32).output.port
     cmd30 = reg(30)
     with always_comb():
-        SynthesizeDecompressor(cmd16, cmd30)
+        SynthesizeDecompressor(cmd16, cmd30, True)
     cmd32 <<= cmd30 % const("2'b11")
 
 

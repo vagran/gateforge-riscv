@@ -541,8 +541,8 @@ class RegReference(OpcodeComponent):
         return s
 
 
-def rs1() -> RegReference:
-    return RegReference(RegType.SRC1)
+def rs1(isNotEqual: Optional[int] = None) -> RegReference:
+    return RegReference(RegType.SRC1, isNotEqual=isNotEqual)
 
 def rs2(isNotEqual: Optional[int] = None) -> RegReference:
     return RegReference(RegType.SRC2, isNotEqual=isNotEqual)
@@ -550,8 +550,8 @@ def rs2(isNotEqual: Optional[int] = None) -> RegReference:
 def rd(isNotEqual: Optional[int] = None) -> RegReference:
     return RegReference(RegType.DST, isNotEqual=isNotEqual)
 
-def rsd():
-    return RegReference(RegType.SRC_DST)
+def rsd(isNotEqual: Optional[int] = None):
+    return RegReference(RegType.SRC_DST, isNotEqual=isNotEqual)
 
 # rs1' (prime) - compressed representation
 def rs1p() -> RegReference:
@@ -757,9 +757,10 @@ def DefineCommands16():
         b("100"), b("0"), rs1(), b("00000"), b("10"))
     cmd("C.MV", mapTo("ADD", [(rs1(), 0)]),
         b("100"), b("0"), rd(), rs2(0), b("10"))
-    # C.EBREAK is skipped intentionally to save resources
+    cmd("C.EBREAK", mapTo("EBREAK"),
+        b("100"), b("1"), b("00000"), b("00000"), b("10"))
     cmd("C.JALR", mapTo("JALR", [(rd(), 1), (imm(), 0)]),
-        b("100"), b("1"), rs1(), b("00000"), b("10"))
+        b("100"), b("1"), rs1(0), b("00000"), b("10"))
     cmd("C.ADD", mapTo("ADD"),
         b("100"), b("1"), rsd(), rs2(0), b("10"))
     cmd("C.SWSP", mapTo("SW", [(rs1(), 2)]),
@@ -1254,7 +1255,8 @@ class SelectionTree:
                 self._SynthesizeNode(node.second, insn16, insn32)
 
 
-def SynthesizeDecompressor(input: InputNet[Wire, 16], output: OutputNet[Reg, 30]):
+def SynthesizeDecompressor(input: InputNet[Wire, 16], output: OutputNet[Reg, 30],
+                           hasEbreak: bool):
     """Synthesize decompressor logic. It results into a bunch of _if/_else statements and
     continuous assignments to the output. So it should called in context of combinational procedural
     block.
@@ -1263,7 +1265,11 @@ def SynthesizeDecompressor(input: InputNet[Wire, 16], output: OutputNet[Reg, 30]
     :param output: 30 bits net with decompressed instruction. Two LSB always are 'b11 for 32 bits
         instruction, so do not use them.
     """
-    selTree = SelectionTree.Generate(commands16.values())
+    if hasEbreak:
+        commands = commands16.values()
+    else:
+        commands = {name: desc for name, desc in commands16.items() if name != "C.EBREAK"}.values()
+    selTree = SelectionTree.Generate(commands)
     selTree.Synthesize(input, output)
 
 
