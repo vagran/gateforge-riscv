@@ -483,7 +483,7 @@ class RiscvCpu:
 
     def _HandleState(self):
 
-        with _if(self.insnFetched | self.branchTaken):
+        with _if(self.insnFetched | self.branchTaken | self.stateWriteBack):
             self._HandleInstruction()
 
         with _elseif(~self.memValid):
@@ -508,15 +508,13 @@ class RiscvCpu:
             # Second pass, ALU has jump address
             self.pc <<= self.alu.outAddSub[self.pc.vectorSize + self.pcAlignBits - 1 : self.pcAlignBits]
             self.stateWriteBack <<= True
-            # Reset instruction pre-fetching pipeline
-            self.insnFetched <<= False
-            if self.params.hasCompressedIsa:
-                self.unalignedInsnFetch <<= False
+            self._ResetInsnPrefetchPipeline()
 
 
     # Initiate fetched instruction execution. `insn` and decoder output will be available on next
     # clock.
     def _ExecuteInstruction(self):
+        self.insnFetched <<= True
         self.stateRegFetch <<= True
 
 
@@ -550,6 +548,7 @@ class RiscvCpu:
                 const(0, self.pcAlignBits)
             self.pc <<= self.alu.outAddSub[self.pc.vectorSize + self.pcAlignBits - 1 : self.pcAlignBits]
             self.stateWriteBack <<= True
+            self._ResetInsnPrefetchPipeline()
 
         with _if (self.insnDecoder.isBranch):
             self.branchTaken <<= self.branchTakenCond
@@ -671,7 +670,7 @@ class RiscvCpu:
                     with _else():
                         self.rd <<= self.alu.inA.srl(self.alu.inB[4:0])
 
-            # For AUIPC and jumps rd is written on REG_FETCH stage before PC was incremented
+            # For AUIPC and jumps `rd` is written on REG_FETCH stage before PC was changed
 
             # Register written by a single clock
             self.writeRd <<= True
@@ -696,7 +695,6 @@ class RiscvCpu:
                 self.insn[15:0] <<= insnLo
                 with _if (IsCompressedInsn(insnLo)):
                     self.unalignedInsnFetch <<= False
-                    self.insnFetched <<= True
                     self._ExecuteInstruction()
                 with _else ():
                     self.unalignedInsnFetch <<= True
@@ -714,6 +712,12 @@ class RiscvCpu:
             self.memValid <<= True
 
 
+    def _ResetInsnPrefetchPipeline(self):
+        self.insnFetched <<= False
+        if self.params.hasCompressedIsa:
+            self.unalignedInsnFetch <<= False
+
+
     def _HandleInstructionFetch(self):
         self.writeRd <<= False
 
@@ -723,7 +727,6 @@ class RiscvCpu:
 
             if not self.params.hasCompressedIsa:
                 self.insn <<= self.memIface.dataRead
-                self.insnFetched <<= True
                 self._ExecuteInstruction()
                 return
 
@@ -733,14 +736,13 @@ class RiscvCpu:
                 with _if (self.unalignedInsnFetch):
                     self.insn[31:16] <<= self.memIface.external.dataRead[15:0]
                     self.insnHi <<= self.memIface.external.dataRead[31:16]
-                    self.insnFetched <<= True
                     self._ExecuteInstruction()
 
                 with _else ():
                     self.insn[15:0] <<= self.memIface.external.dataRead[31:16]
 
                     with _if (IsCompressedInsn(self.memIface.external.dataRead[31:16])):
-                        self.insnFetched <<= True
+                        self._ExecuteInstruction()
                     with _else ():
                         self.unalignedInsnFetch <<= True
                         self.memAddress <<= self.pc[:1] + 1
@@ -749,5 +751,4 @@ class RiscvCpu:
             with _else ():
                 # Aligned fetch
                 self.insn <<= self.memIface.external.dataRead
-                self.insnFetched <<= True
                 self._ExecuteInstruction()

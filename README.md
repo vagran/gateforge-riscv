@@ -31,12 +31,15 @@ package.
 
 Use the following command to build test firmware in `test/firmware` directory:
 ```bash
-zig build -Dname=simple
+zig build -Dname=simple -Dcompressed=false
 ```
 `name` parameter specifies firmware variant name. Currently there are `simple`, `print` and `spigot`
 values accepted. `spigot` firmware is the most complex one and serves as end-to-end ultimate test.
 It uses custom memory allocator, custom arbitrary precision integer arithmetic implementation and
 Spigot algorithm to calculate some number (defined in the test) of Pi digits, which are then
-verified with the expected sequence.
+verified with the expected sequence. `compressed` parameter selects if compressed instructions (`C`
+extension is enabled for target).
+
+Run `build.sh path_to_zig_compiler` to build all firmware variants.
 
 TODO Check and report FPGA utilization on a sample board.

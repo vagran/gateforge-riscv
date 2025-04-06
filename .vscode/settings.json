@@ -51,6 +51,7 @@
         "noreturn",
         "OBJDUMP",
         "OPENDRAIN",
+        "orelse",
         "posedge",
         "PULLMODE",
         "pyftdi",

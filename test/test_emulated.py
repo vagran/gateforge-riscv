@@ -997,6 +997,305 @@ class TestCompressed(TestBase):
         self.assertEqual(testValue + 2, self.mem.ReadWord(TEST_DATA_ADDR + offset))
 
 
+    def TestSoftMul(self, x, y):
+
+        a0 = 10
+        a1 = 11
+        a2 = 12
+        a3 = 13
+
+        self.SetProgram([
+            *Li(x, a0), # 0
+            *Li(y, a1), # 4
+            *Li(0, a2), # 8
+            asm("C.BEQZ", rs1=a0, imm=(21-12)*2), # 12
+            asm("SLLI", rd=a3, rs1=a0, imm=31), # 13
+            asm("C.SRAI", rsd=a3, imm=31), # 15
+            asm("C.AND", rsd=a3, rs2=a1), # 16
+            asm("C.ADD", rsd=a2, rs2=a3), # 17
+            asm("C.SRLI", rsd=a0, imm=1), # 18
+            asm("C.SLLI", rsd=a1, imm=1), # 19
+            asm("C.BNEZ", rs1=a0, imm=(13-20)*2), # 20
+            *Li(TEST_DATA_ADDR, 14), # 21
+            asm("SW", imm=0, rs1=14, rs2=a2),
+            asm("EBREAK")
+        ])
+
+        self.WaitEbreak()
+
+        expected = (x * y) & 0xFFFFFFFF
+        self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_soft_mul(self):
+        self.TestSoftMul(0xdeadbeef, 0xcc9e2d51)
+
+    def test_soft_mul_0(self):
+        self.TestSoftMul(0xdeadbeef, 0)
+
+    def test_soft_mul_0_1(self):
+        self.TestSoftMul(0, 0xdeadbeef)
+
+    def test_soft_mul_1(self):
+        self.TestSoftMul(1, 0xdeadbeef)
+
+    def test_soft_mul_2(self):
+        self.TestSoftMul(2, 0xdeadbeef)
+
+    def test_soft_mul_zero_lsb(self):
+        self.TestSoftMul(0xdeadbeef, 0x16a88000)
+
+
+    def test_procedure_call_mul(self):
+        ra = 1
+        a0 = 10
+        a1 = 11
+        a2 = 12
+        a3 = 13
+        s0 = 8
+        s1 = 9
+
+        x = 0xdeadbeef
+        y = 0xcc9e2d51
+
+        self.SetProgram([
+            *Li(x, a0), # 0
+            *Li(y, a1), # 4
+            asm("ADDI", imm=0, rs1=a0, rd=s0), # 8
+
+            asm("AUIPC", rd=ra, imm=0), # 10
+            asm("C.JAL", imm=(32-12)*2), # 12 0x4b0b6c9f
+
+            asm("ADDI", imm=0, rs1=a0, rd=s1), # 13
+            asm("LUI", rd=a1, imm=(y << 15) & 0xffff_ffff), # 15 0x16a88000
+            asm("ADDI", imm=0, rs1=s0, rd=a0), # 17
+            asm("AUIPC", rd=ra, imm=0), # 19
+            asm("C.JAL", imm=(32-21)*2), # 21 0xb64f8000
+            asm("C.SRLI", rsd=s1, imm=17), # 22 0x2585
+            asm("C.OR", rsd=a0, rs2=s1), # 23 0xb64fa585
+
+            *Li(TEST_DATA_ADDR, 14), # 24
+            asm("SW", imm=0, rs1=14, rs2=a0), # 28
+            asm("EBREAK"), # 30
+
+            # 32 - mul subroutine
+            asm("C.LI", rd=a2, imm=0),
+            asm("C.BEQZ", rs1=a0, imm=(21-12)*2), # 12
+            asm("SLLI", rd=a3, rs1=a0, imm=31), # 13
+            asm("C.SRAI", rsd=a3, imm=31), # 15
+            asm("C.AND", rsd=a3, rs2=a1), # 16
+            asm("C.ADD", rsd=a2, rs2=a3), # 17
+            asm("C.SRLI", rsd=a0, imm=1), # 18
+            asm("C.SLLI", rsd=a1, imm=1), # 19
+            asm("C.BNEZ", rs1=a0, imm=(13-20)*2), # 20
+            asm("C.MV", rd=a0, rs2=a2),
+            asm("C.JR", rs1=ra)
+        ])
+
+        self.WaitEbreak()
+
+        expected = x * y # 0x4b0b6c9f
+        expected &= 0xffff_ffff
+        expected = (expected << 15) | (expected >> (32 - 15))  # Rotate left 15 bits
+        expected &= 0xffff_ffff
+        self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_procedure_call_simple(self):
+        ra = 1
+        a0 = 10
+        a1 = 11
+        s0 = 8
+        s1 = 9
+
+        x = 0xdeadbeef
+        y = 0xcc9e2d51
+
+        self.SetProgram([
+            *Li(x, a0), # 0
+            *Li(y, a1), # 4
+            asm("ADDI", imm=0, rs1=a0, rd=s0), # 8
+
+            asm("AUIPC", rd=ra, imm=0), # 10
+            asm("C.JAL", imm=(32-12)*2), # 12
+
+            asm("ADDI", imm=0, rs1=a0, rd=s1), # 13
+
+            asm("LUI", rd=a1, imm=(y << 12) & 0xffff_ffff), # 15
+
+            asm("SRLI", imm=13, rs1=s0, rd=a0), # 17
+
+            asm("AUIPC", rd=ra, imm=0), # 19
+            asm("C.JAL", imm=(32-21)*2), # 21
+
+            asm("C.SRLI", rsd=s1, imm=17), # 22
+            asm("C.XOR", rsd=a0, rs2=s1), # 23
+
+            *Li(TEST_DATA_ADDR, 14), # 24
+            asm("SW", imm=0, rs1=14, rs2=a0), # 28
+            asm("EBREAK"), # 30
+
+            # 32 - subroutine
+            asm("C.XOR", rsd=a0, rs2=a1),
+            asm("C.JR", rs1=ra)
+        ])
+
+        self.WaitEbreak()
+
+        a = x ^ y # 0x123393be
+        b = (x >> 13) ^ (y << 12) # 0x6f56d ^ 0xe2d51000 = 0xe2d3e56d
+        b &= 0xffff_ffff
+        expected = (a >> 17) ^ b # 0x919 ^ b = 0xe2d3ec74
+        self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_procedure_call_simple_unaligned(self):
+        ra = 1
+        a0 = 10
+        a1 = 11
+        s0 = 8
+        s1 = 9
+
+        x = 0xdeadbeef
+        y = 0xcc9e2d51
+
+        self.SetProgram([
+            *Li(x, a0), # 0
+            *Li(y, a1), # 4
+            asm("ADDI", imm=0, rs1=a0, rd=s0), # 8
+
+            asm("AUIPC", rd=ra, imm=0), # 10
+            asm("C.JAL", imm=(33-12)*2), # 12
+
+            asm("ADDI", imm=0, rs1=a0, rd=s1), # 13
+
+            asm("LUI", rd=a1, imm=(y << 12) & 0xffff_ffff), # 15
+
+            asm("SRLI", imm=13, rs1=s0, rd=a0), # 17
+
+            asm("AUIPC", rd=ra, imm=0), # 19
+            asm("C.JAL", imm=(33-21)*2), # 21
+
+            asm("C.SRLI", rsd=s1, imm=17), # 22
+            asm("C.XOR", rsd=a0, rs2=s1), # 23
+
+            *Li(TEST_DATA_ADDR, 14), # 24
+            asm("SW", imm=0, rs1=14, rs2=a0), # 28
+            asm("EBREAK"), # 30
+
+            asm("C.XOR", rsd=a0, rs2=a0), # 32 Consume space to shift the subroutine
+
+            # 33 - subroutine
+            asm("C.XOR", rsd=a0, rs2=a1),
+            asm("C.JR", rs1=ra)
+        ])
+
+        self.WaitEbreak()
+
+        a = x ^ y # 0x123393be
+        b = (x >> 13) ^ (y << 12) # 0x6f56d ^ 0xe2d51000 = 0xe2d3e56d
+        b &= 0xffff_ffff
+        expected = (a >> 17) ^ b # 0x919 ^ b = 0xe2d3ec74
+        self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_procedure_call_simple_jalr(self):
+        ra = 1
+        a0 = 10
+        a1 = 11
+        s0 = 8
+        s1 = 9
+
+        x = 0xdeadbeef
+        y = 0xcc9e2d51
+
+        self.SetProgram([
+            *Li(x, a0), # 0
+            *Li(y, a1), # 4
+            asm("ADDI", imm=0, rs1=a0, rd=s0), # 8
+
+            asm("AUIPC", rd=ra, imm=0), # 10
+            asm("JALR", imm=(34-10)*2, rs1=ra, rd=ra), # 12
+
+            asm("ADDI", imm=0, rs1=a0, rd=s1), # 14
+
+            asm("LUI", rd=a1, imm=(y << 12) & 0xffff_ffff), # 16
+
+            asm("SRLI", imm=13, rs1=s0, rd=a0), # 18
+
+            asm("AUIPC", rd=ra, imm=0), # 20
+            asm("JALR", imm=(34-20)*2, rs1=ra, rd=ra), # 22
+
+            asm("C.SRLI", rsd=s1, imm=17), # 24
+            asm("C.XOR", rsd=a0, rs2=s1), # 25
+
+            *Li(TEST_DATA_ADDR, 14), # 26
+            asm("SW", imm=0, rs1=14, rs2=a0), # 30
+            asm("EBREAK"), # 32
+
+            # 34 - subroutine
+            asm("C.XOR", rsd=a0, rs2=a1),
+            asm("C.JR", rs1=ra)
+        ])
+
+        self.WaitEbreak()
+
+        a = x ^ y # 0x123393be
+        b = (x >> 13) ^ (y << 12) # 0x6f56d ^ 0xe2d51000 = 0xe2d3e56d
+        b &= 0xffff_ffff
+        expected = (a >> 17) ^ b # 0x919 ^ b = 0xe2d3ec74
+        self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
+    def test_procedure_call_simple_jalr_unaligned(self):
+        ra = 1
+        a0 = 10
+        a1 = 11
+        s0 = 8
+        s1 = 9
+
+        x = 0xdeadbeef
+        y = 0xcc9e2d51
+
+        self.SetProgram([
+            *Li(x, a0), # 0
+            *Li(y, a1), # 4
+            asm("C.XOR", rsd=12, rs2=12), # 8 Consume space to shift alignment
+            asm("ADDI", imm=0, rs1=a0, rd=s0), # 9
+
+            asm("AUIPC", rd=ra, imm=0), # 11
+            asm("JALR", imm=(35-11)*2, rs1=ra, rd=ra), # 13
+
+            asm("ADDI", imm=0, rs1=a0, rd=s1), # 15
+
+            asm("LUI", rd=a1, imm=(y << 12) & 0xffff_ffff), # 17
+
+            asm("SRLI", imm=13, rs1=s0, rd=a0), # 19
+
+            asm("AUIPC", rd=ra, imm=0), # 21
+            asm("JALR", imm=(35-21)*2, rs1=ra, rd=ra), # 23
+
+            asm("C.SRLI", rsd=s1, imm=17), # 25
+            asm("C.XOR", rsd=a0, rs2=s1), # 26
+
+            *Li(TEST_DATA_ADDR, 14), # 27
+            asm("SW", imm=0, rs1=14, rs2=a0), # 31
+            asm("EBREAK"), # 33
+
+            # 35 - subroutine
+            asm("C.XOR", rsd=a0, rs2=a1),
+            asm("C.JR", rs1=ra)
+        ])
+
+        self.WaitEbreak()
+
+        a = x ^ y # 0x123393be
+        b = (x >> 13) ^ (y << 12) # 0x6f56d ^ 0xe2d51000 = 0xe2d3e56d
+        b &= 0xffff_ffff
+        expected = (a >> 17) ^ b # 0x919 ^ b = 0xe2d3ec74
+        self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
 def hash(x1, x2, seed):
     h = seed
     c1 = 0xcc9e2d51
@@ -1061,8 +1360,14 @@ def ParsePiDigits(n):
 class TestWithFirmware(TestBase):
     baseDir = Path(__file__).parent
 
+
+    def GetFwPath(self, name):
+        c = "_C" if self.hasCompressedIsa else ""
+        return self.baseDir / "firmware" / "zig-out" / "bin" / f"firmware_{name}{c}.bin"
+
+
     def test_simple(self):
-        with open(self.baseDir / "firmware" / "zig-out" / "bin" / "firmware_simple.bin", mode="rb") as f:
+        with open(self.GetFwPath("simple"), mode="rb") as f:
             fw = f.read()
         self.mem.WriteBytes(0, fw)
 
@@ -1082,7 +1387,7 @@ class TestWithFirmware(TestBase):
 
 
     def test_print(self):
-        with open(self.baseDir / "firmware" / "zig-out" / "bin" / "firmware_print.bin", mode="rb") as f:
+        with open(self.GetFwPath("print"), mode="rb") as f:
             fw = f.read()
         self.mem.WriteBytes(0, fw)
 
@@ -1102,7 +1407,7 @@ class TestWithFirmware(TestBase):
     def test_spigot(self):
         self.enableVcd = False
 
-        with open(self.baseDir / "firmware" / "zig-out" / "bin" / "firmware_spigot.bin", mode="rb") as f:
+        with open(self.GetFwPath("spigot"), mode="rb") as f:
             fw = f.read()
         self.mem.WriteBytes(0, fw)
 
@@ -1117,3 +1422,9 @@ class TestWithFirmware(TestBase):
         expected = ParsePiDigits(10)
         for digit, expectedDigit in zip(digits, expected):
             self.assertEqual(digit, expectedDigit)
+
+
+@unittest.skipIf(disableVerilatorTests, "Verilator")
+@unittest.skipIf(disableFirmwareTests, "Firmware")
+class TestWithFirmwareCompressed(TestWithFirmware):
+    hasCompressedIsa = True
