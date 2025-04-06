@@ -519,6 +519,8 @@ class RiscvCpu:
 
 
     def _HandleRegFetch(self):
+        # May be not reset if short path taken - compressed instruction already fetched.
+        self.writeRd <<= False
 
         if self.params.hasEbreak:
             with _if (self.insnDecoder.isEbreak):

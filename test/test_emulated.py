@@ -1101,6 +1101,62 @@ class TestCompressed(TestBase):
         self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
 
 
+    def test_procedure_call_mul_jalr_unaligned(self):
+        ra = 1
+        a0 = 10
+        a1 = 11
+        a2 = 12
+        a3 = 13
+        s0 = 8
+        s1 = 9
+
+        x = 0xdeadbeef
+        y = 0xcc9e2d51
+
+        self.SetProgram([
+            *Li(x, a0), # 0
+            *Li(y, a1), # 4
+            asm("ADDI", imm=0, rs1=a0, rd=s0), # 8
+            asm("C.XOR", rsd=12, rs2=12), # 10 Consume space to shift alignment
+
+            asm("AUIPC", rd=ra, imm=0), # 11
+            asm("JALR", rsd=ra, imm=(35-11)*2), # 13 0x4b0b6c9f
+
+            asm("ADDI", imm=0, rs1=a0, rd=s1), # 15
+            asm("LUI", rd=a1, imm=(y << 15) & 0xffff_ffff), # 17 0x16a88000
+            asm("ADDI", imm=0, rs1=s0, rd=a0), # 19
+            asm("AUIPC", rd=ra, imm=0), # 21
+            asm("JALR", rsd=ra, imm=(35-21)*2), # 23 0xb64f8000
+            asm("C.SRLI", rsd=s1, imm=17), # 25 0x2585
+            asm("C.OR", rsd=a0, rs2=s1), # 26 0xb64fa585
+
+            *Li(TEST_DATA_ADDR, 14), # 27
+            asm("SW", imm=0, rs1=14, rs2=a0), # 31
+            asm("EBREAK"), # 33
+
+            # 35 - mul subroutine
+            asm("C.LI", rd=a2, imm=0),
+            asm("C.BEQZ", rs1=a0, imm=(21-12)*2), # 34
+            asm("SLLI", rd=a3, rs1=a0, imm=31), # 35
+            asm("C.SRAI", rsd=a3, imm=31), # 37
+            asm("C.AND", rsd=a3, rs2=a1), # 38
+            asm("C.ADD", rsd=a2, rs2=a3), # 39
+            asm("C.SRLI", rsd=a0, imm=1), # 40
+            asm("C.SLLI", rsd=a1, imm=1), # 41
+            asm("C.BNEZ", rs1=a0, imm=(13-20)*2), # 42
+            asm("C.MV", rd=a0, rs2=a2), # 43
+            asm("C.JR", rs1=ra) # 44
+        ])
+
+        self.WaitEbreak()
+
+        expected = x * y # 0x4b0b6c9f
+        expected &= 0xffff_ffff
+        expected = (expected << 15) | (expected >> (32 - 15))  # Rotate left 15 bits
+        expected &= 0xffff_ffff # 0xb64fa585
+        self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
+
+
     def test_procedure_call_simple(self):
         ra = 1
         a0 = 10
@@ -1296,7 +1352,7 @@ class TestCompressed(TestBase):
         self.assertEqual(expected, self.mem.ReadWord(TEST_DATA_ADDR))
 
 
-def hash(x1, x2, seed):
+def TestHash(x1, x2, seed):
     h = seed
     c1 = 0xcc9e2d51
     c2 = 0x1b873593
@@ -1373,7 +1429,7 @@ class TestWithFirmware(TestBase):
 
         testAddr = 0x800
         inValue = 0x12345678deadbeef
-        testValue = hash(inValue & 0xFFFFFFFF, inValue >> 32, 0xc001babe)
+        testValue = TestHash(inValue & 0xFFFFFFFF, inValue >> 32, 0xc001babe)
         self.mem.WriteBytes(testAddr + 8, struct.pack("<Q", inValue))
 
         self.Reset()

@@ -47,9 +47,26 @@
             }
         },
         {
+            "label": "Run unit tests (no firmware)",
+            "command": "${workspaceFolder}/.venv/bin/python",
+            "args": ["-m", "unittest", "discover", "-t", "${workspaceFolder}",
+                     "-s", "${workspaceFolder}/test"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PYTHONPATH": "${workspaceFolder}/src:${workspaceFolder}/test",
+                    "PYTHONUNBUFFERED": "1",
+                    "PATH": "${config:env.ossCadSuiteDir}/bin:${env:PATH}",
+                    "GF_TEST_CC": "/opt/clang-riscv/bin/clang",
+                    "GF_TEST_OBJDUMP": "/opt/clang-riscv/bin/llvm-objdump",
+                    "DISABLE_FIRMWARE_TESTS": "1"
+                }
+            }
+        },
+        {
             "label": "Run specific unit test",
             "command": "${workspaceFolder}/.venv/bin/python",
-            "args": ["-m", "unittest", "test.test_emulated.TestWithFirmware.test_spigot"],
+            "args": ["-m", "unittest", "test.test_emulated.TestCompressed.test_procedure_call_mul_jalr_unaligned"],
             "options": {
                 "cwd": "${workspaceFolder}",
                 "env": {
@@ -72,7 +89,7 @@
         {
             "label": "Compile firmware (simple)",
             "command": "${config:env.zig}",
-            "args": ["build", "-Dname=simple"],
+            "args": ["build", "-Dname=simple", "-Dcompressed=true"],
             "options": {
                 "cwd": "${workspaceFolder}/test/firmware"
             }
@@ -89,6 +106,14 @@
             "label": "Compile firmware (spigot)",
             "command": "${config:env.zig}",
             "args": ["build", "-Dname=spigot"],
+            "options": {
+                "cwd": "${workspaceFolder}/test/firmware"
+            }
+        },
+        {
+            "label": "Build firmware",
+            "type": "shell",
+            "command": "bash ${workspaceFolder}/test/firmware/build.sh ${config:env.zig}",
             "options": {
                 "cwd": "${workspaceFolder}/test/firmware"
             }
