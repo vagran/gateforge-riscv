@@ -76,7 +76,7 @@ class Memory:
 
 
 class TestBase(unittest.TestCase):
-    hasCompressedIsa = False
+    hasCompressedInsn = False
     result: CompileResult
     enableVcd = True
 
@@ -86,7 +86,7 @@ class TestBase(unittest.TestCase):
         cls.result = CompileModule(TestbenchModule, NullOutput(),
                                    renderOptions=RenderOptions(sourceMap=True),
                                    verilatorParams=GetVerilatorParams(cls.__name__),
-                                   moduleKwargs={"hasCompressedIsa": cls.hasCompressedIsa})
+                                   moduleKwargs={"hasCompressedInsn": cls.hasCompressedInsn})
 
 
     @classmethod
@@ -955,12 +955,12 @@ class TestNoCompression(TestBase):
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestUncompressedOnCompressedIsa(TestNoCompression):
-    hasCompressedIsa = True
+    hasCompressedInsn = True
 
 
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 class TestCompressed(TestBase):
-    hasCompressedIsa = True
+    hasCompressedInsn = True
 
     def test_c_li(self):
 
@@ -1418,7 +1418,7 @@ class TestWithFirmware(TestBase):
 
 
     def GetFwPath(self, name):
-        c = "_C" if self.hasCompressedIsa else ""
+        c = "_C" if self.hasCompressedInsn else ""
         return self.baseDir / "firmware" / "zig-out" / "bin" / f"firmware_{name}{c}.bin"
 
 
@@ -1483,4 +1483,4 @@ class TestWithFirmware(TestBase):
 @unittest.skipIf(disableVerilatorTests, "Verilator")
 @unittest.skipIf(disableFirmwareTests, "Firmware")
 class TestWithFirmwareCompressed(TestWithFirmware):
-    hasCompressedIsa = True
+    hasCompressedInsn = True

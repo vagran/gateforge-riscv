@@ -13,7 +13,7 @@ from riscv.instruction_set import SynthesizeDecompressor
 @dataclass
 class RiscvParams:
     # RV32C profile
-    hasCompressedIsa: bool = False
+    hasCompressedInsn: bool = False
     # RV32E profile
     isEmbedded: bool = False
     hasEbreak: bool = False
@@ -351,7 +351,7 @@ class RiscvCpu:
         """
         self.params = params
 
-        self.pcAlignBits = 1 if params.hasCompressedIsa else 2
+        self.pcAlignBits = 1 if params.hasCompressedInsn else 2
         self.regIdxBits = 4 if self.params.isEmbedded else 5
 
         self.ctrlIface = ctrlIface
@@ -371,7 +371,7 @@ class RiscvCpu:
 
         self.insn = reg("insn", 32)
 
-        if self.params.hasCompressedIsa:
+        if self.params.hasCompressedInsn:
             self.insnHi = reg("insnHi", 16)
             self.unalignedInsnFetch = reg("unalignedInsnFetch")
 
@@ -425,7 +425,7 @@ class RiscvCpu:
         self.ctrlIface.trap <<= self.stateTrap
         self.ctrlIface.ebreak <<= self.insnFetched & self.insnDecoder.isEbreak
 
-        if self.params.hasCompressedIsa:
+        if self.params.hasCompressedInsn:
             self.nextPc <<= cond(IsCompressedInsn(self.insn), self.pc + 1, self.pc + 2)
         else:
             self.nextPc <<= self.pc + 1
@@ -481,7 +481,7 @@ class RiscvCpu:
 
         self.insnFetched <<= False
         self.pc <<= 0
-        if self.params.hasCompressedIsa:
+        if self.params.hasCompressedInsn:
             self.unalignedInsnFetch <<= False
 
         self.stateRegFetch <<= False
@@ -698,7 +698,7 @@ class RiscvCpu:
     def _FetchInstruction(self):
         self.insnFetched <<= False
 
-        if not self.params.hasCompressedIsa:
+        if not self.params.hasCompressedInsn:
             self.memAddress <<= self.pc
             self.memValid <<= True
             return
@@ -729,7 +729,7 @@ class RiscvCpu:
 
     def _ResetInsnPrefetchPipeline(self):
         self.insnFetched <<= False
-        if self.params.hasCompressedIsa:
+        if self.params.hasCompressedInsn:
             self.unalignedInsnFetch <<= False
 
 
@@ -740,7 +740,7 @@ class RiscvCpu:
 
             self.memValid <<= False
 
-            if not self.params.hasCompressedIsa:
+            if not self.params.hasCompressedInsn:
                 self.insn <<= self.memIface.dataRead
                 self._ExecuteInstruction()
                 return
